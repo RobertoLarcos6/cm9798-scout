@@ -364,6 +364,33 @@ table.fz3 th.ctr:not(:nth-child(-n+3)),table.fz3 td.ctr:not(:nth-child(-n+3)){mi
 
 .cg{color:#1a7a3a;font-weight:700}.co{color:#b86e00;font-weight:700}.cr{color:#c0392b;font-weight:700}
 @media (prefers-color-scheme:dark){.cg{color:#6fdc90}.co{color:#f0b24a}.cr{color:#f28b82}}
+
+/* regens: old player / new player blocks */
+table.t.grouped thead tr.grow th{position:sticky;top:0;z-index:3;font-size:11.5px;letter-spacing:.06em;text-align:left;padding:7px 10px;cursor:default;border-bottom:none}
+table.t.grouped thead tr:not(.grow) th{top:31px}
+table.t th.grp.g0{background:#f3e3b8;color:#5a4100}
+table.t th.grp.g1{background:#cfe8d6;color:#0e3b1c}
+table.t th.grp.g2{background:var(--head);color:var(--mute)}
+table.t td.g0{background:rgba(226,180,79,.14)}
+table.t .gs{border-left:3px solid var(--acc)}
+table.t td.g0.gs,table.t th.g0.gs{border-left-color:#c9962b}
+table.t tr:hover td.g0{background:rgba(226,180,79,.26)}
+@media (prefers-color-scheme:dark){table.t th.grp.g0{background:#4a3b12;color:#f0dc9a}table.t th.grp.g1{background:#1f4a30;color:#b9ecc9}table.t td.g0{background:rgba(226,180,79,.10)}}
+
+/* regens: panel layout, opaque frozen cells, aligned tick boxes */
+.rgp .rgh{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.rgp .rgb{display:flex;gap:8px}
+.rgp .rgf{display:grid;grid-template-columns:repeat(4,1fr);gap:12px 14px;align-items:end}
+.rgp .rgf label.f{gap:4px;font-size:12px;font-weight:600;color:var(--mute)}
+.rgp .rgf input,.rgp .rgf select{height:34px;font-size:13px;width:100%}
+.rgp .rgf .two{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-weight:400}
+.rgp .rgs{grid-column:span 1}
+@media (max-width:900px){.rgp .rgf{grid-template-columns:1fr 1fr}}
+table.t td.g0{background-color:#f6ecd2}
+table.t tr:hover td.g0{background-color:#f1e0b3}
+@media (prefers-color-scheme:dark){table.t td.g0{background-color:#2e2815}table.t tr:hover td.g0{background-color:#3b331b}}
+table.t.grouped td:nth-child(3),table.t.grouped th:nth-child(3){min-width:200px}
+.rail .sec:nth-child(1) .fl .chk{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
 </style></head>
 <body><div id="top"><header id="hdr"></header><nav id="tabs"></nav></div><main id="view"></main>
 <script>
@@ -538,9 +565,76 @@ function buildWorld(files,slot,gameDate){
   }
   try{world.engine=makeAvailEngine(files,players,teams);}catch(e){world.engine=null;world.warnings.push('Availability rule could not be set up ('+e.message+'); using the old estimate.');}
   if(!world.engine&&!(files.mg&&files.cp))world.warnings.push('MGDATA'+slot+'.S16 and CPDATA'+slot+'.S16 not found: the game\'s Unavailable rule is off and the older estimate is used.');
+  world.regens={list:[],ok:false,anchors:0,total:players.length};
+  if(files.db1players){try{world.regens=computeRegens(players,parseDB1(files.db1players).recs,natName);}catch(e){world.warnings.push('Regens could not be worked out: '+e.message);}}
   computeAges(world,gameDate);
   world.clubs=teams.filter(t=>players.some?true:true);
   return world;
+}
+
+/* ---- Regens ----
+   When the game replaces a player at the end of a season, the new player (the "regen") is written into the SAME slot of the
+   player list as the player he replaces, and the save's list keeps the order of PLAYERS.DB1. So a player who is not in
+   PLAYERS.DB1 sits between two players who are, and the database records in that gap that are missing from the save include
+   the player he replaced. Tested against two real saves either side of a season end (every regen found, no false ones). */
+/* Which PLAYERS.DB1 field holds each save attribute. Measured on real saves: four of the database's attribute fields are one step out of line with the save
+   (e.g. the save's Adaptability is the database's "Aggression"), and two attributes are not comparable: Character and Consistency are re-rolled for a regen. */
+const DB_ATTR={'Adaptability':'Aggression','Aggression':'Big-Occasion','Big-Occasion':'Character','Marking':'Adaptability','Character':null,'Consistency':null};
+const dbField=a=>a in DB_ATTR?DB_ATTR[a]:a;
+const DB_POS=['Goalkeeper','Sweeper','Defence','Anchor','Midfield','Support','Attack','Right Sided','Left Sided','Central'];
+const dbAbil=v=>v>200?v-128:(v>0?v:0);   // the starting database stores Ability/Potential above 121 as value+128
+function computeRegens(players,db,natName){
+  const nn=s=>(s||'').replace(/\*/g,'').trim().toLowerCase();
+  const dbKey=r=>{const m=/^(\d+)\.(\d+)\.(\d+)$/.exec(r['Date of Birth']||'');return m?nn(r['First Name'])+'|'+nn(r['Second Name'])+'|'+(+m[1])+'|'+(+m[2])+'|'+(+m[3]):null;};
+  const plKeyOf=p=>nn(p.first)+'|'+nn(p.last)+'|'+p.dobD+'|'+p.dobM+'|'+(p.dobY%100);
+  const idx=new Map();db.forEach((r,i)=>{const k=dbKey(r);if(k&&!idx.has(k))idx.set(k,i);});
+  const n=players.length;const anchor=new Array(n).fill(-1);const used=new Set();let nA=0;
+  for(let i=0;i<n;i++){const j=idx.get(plKeyOf(players[i]));if(j!==undefined&&!used.has(j)){anchor[i]=j;used.add(j);nA++;}}
+  for(const p of players){p.regen=null;}
+  const res={list:[],anchors:nA,total:n,ok:nA>n*0.5};
+  if(!res.ok)return res;   // the database does not belong to this save: say nothing rather than guess
+  const hard=anchor.slice();
+  const prevA=new Array(n),nextA=new Array(n);let last=-1;
+  for(let i=0;i<n;i++){if(hard[i]>=0)last=hard[i];prevA[i]=last;}
+  last=db.length;for(let i=n-1;i>=0;i--){if(hard[i]>=0)last=hard[i];nextA[i]=last;}
+  // same person spelled differently in the database: treat as matched too, so he is neither a regen nor a candidate
+  for(let i=0;i<n;i++){
+    if(anchor[i]>=0)continue;const p=players[i];const pn=nn(p.first)+'|'+nn(p.last);
+    for(let j=prevA[i]+1;j<nextA[i];j++){if(!used.has(j)&&nn(db[j]['First Name'])+'|'+nn(db[j]['Second Name'])===pn){anchor[i]=j;used.add(j);break;}}
+  }
+  const ATT=ATTRS;
+  const posOfSave=p=>p.pos.join('');const posOfDb=r=>DB_POS.map(k=>r[k]).join('');
+  const score=(p,r)=>{let agree=0,known=0,close=0;
+    for(const a of ATT){const f=dbField(a);if(!f)continue;const v=r[f];if(v>0){known++;const d=Math.abs(v-p.attr[a]);if(d===0){agree++;close+=1;}else if(d===1)close+=.5;}}
+    const pa=r.Potential>0&&dbAbil(r.Potential)===p.pa;return {agree,known,close,pa,s:close+(pa?0.5:0)};};
+  let lastA=-1,S=[];
+  const flush=nextAnchor=>{
+    if(!S.length)return;
+    const G=[];for(let j=lastA+1;j<nextAnchor;j++)if(!used.has(j))G.push(j);
+    const m=S.length,g=G.length;
+    // Same nation is required. Positions must match; a player can also have learnt positions since the game began, so
+    // "every position at least as good as in the starting database" counts too (weaker).
+    const comp=S.map(p=>{const nat=natName[p.natId],ps=posOfSave(p);return G.map(j=>{const r=db[j];if(r.Nation!==nat)return 0;
+      if(posOfDb(r)===ps)return 1001;for(let k=0;k<10;k++)if(p.pos[k]<r[DB_POS[k]])return 0;return 1000;});});
+    // Order rule: the game writes each regen into the slot of the player he replaced, so within this stretch
+    // of the list the regens and the replaced players keep the same order. Find every pairing that keeps order.
+    const A=Array.from({length:m+1},()=>new Array(g+1).fill(0)),B=Array.from({length:m+2},()=>new Array(g+2).fill(0));
+    for(let x=0;x<m;x++)for(let y=0;y<g;y++)A[x+1][y+1]=Math.max(A[x+1][y],A[x][y+1],A[x][y]+comp[x][y]);
+    for(let x=m-1;x>=0;x--)for(let y=g-1;y>=0;y--)B[x][y]=Math.max(B[x][y+1],B[x+1][y],B[x+1][y+1]+comp[x][y]);
+    const T=A[m][g];
+    S.forEach((p,x)=>{
+      const cands=[];
+      for(let y=0;y<g;y++){if(!comp[x][y]||A[x][y]+comp[x][y]+B[x+1][y+1]!==T)continue;const r=db[G[y]];cands.push(Object.assign({rec:r,j:G[y]},score(p,r)));}
+      cands.sort((u,v)=>v.s-u.s);
+      const top=cands[0]||null;
+      p.regen={cands:cands.slice(0,6),nCand:cands.length,top,conf:!top?'none':cands.length===1?'likely':'uncertain',gapSize:g};
+      res.list.push(p);
+    });
+    S=[];
+  };
+  for(let i=0;i<n;i++){if(anchor[i]>=0){flush(anchor[i]);lastA=anchor[i];}else S.push(players[i]);}
+  flush(db.length);
+  return res;
 }
 /* ---- The game's own "Unavailable" rule ----
    Ported from the game code (the availability routine used by the search filter "Excluding Unavailable")
@@ -953,7 +1047,7 @@ function engineScore(pl,ctx,row,col,withPen){
 
 const PRESETS={};
 
-if(false)module.exports={setCondPen,cupTied,setPick,getPick,parseComps,makeForeign,makeBench,setGkMix,outReason,leadership,captainRank,spRank,spScore,getEngine,ratingBest,setArrows,slotSel,engineOn,engineCtx,engineScore,setEngine,ENG_CORE,ATTRS,POS,POS_SHORT,BANDS,AVAIL,parseIdx,parseDB1,parseTeamsSave,parsePlayersSave,buildWorld,computeAges,roleFit,roleFit100,pick,roleFitR,pickR,roleKeyFor,bestRole,ROLE_LABEL,ROLE_KEYS,penalty,adjusted,arrowInfo,lineSplit,hungarian,solveSquad,PRESETS,DEFAULT_CFG,fmtDate,contractEnds,LEAGUE_NAMES};
+if(false)module.exports={dbAbil,dbField,computeRegens,parseDB1,setCondPen,cupTied,setPick,getPick,parseComps,makeForeign,makeBench,setGkMix,outReason,leadership,captainRank,spRank,spScore,getEngine,ratingBest,setArrows,slotSel,engineOn,engineCtx,engineScore,setEngine,ENG_CORE,ATTRS,POS,POS_SHORT,BANDS,AVAIL,parseIdx,parseDB1,parseTeamsSave,parsePlayersSave,buildWorld,computeAges,roleFit,roleFit100,pick,roleFitR,pickR,roleKeyFor,bestRole,ROLE_LABEL,ROLE_KEYS,penalty,adjusted,arrowInfo,lineSplit,hungarian,solveSquad,PRESETS,DEFAULT_CFG,fmtDate,contractEnds,LEAGUE_NAMES};
 
 
 /* ---------- tiny helpers ---------- */
@@ -1061,7 +1155,7 @@ const S={world:null,cfg:Object.assign({},DEFAULT_CFG,store.get('cfg',{})),tab:'s
   load:{files:null,slots:[]}};
 S.cfg.roles=JSON.parse(JSON.stringify(Object.assign({},DEFAULT_CFG.roles,S.cfg.roles||{})));S.cfg.weights=Object.assign({},DEFAULT_CFG.weights,S.cfg.weights);S.cfg.gkMix=Object.assign({},DEFAULT_CFG.gkMix,S.cfg.gkMix);if(S.cfg.ratV!==2){if(S.cfg.ratGood===75&&S.cfg.ratOk===60){S.cfg.ratGood=68;S.cfg.ratOk=54;}S.cfg.ratV=2;}S.cfg.gkWeights=Object.assign({},DEFAULT_CFG.gkWeights,S.cfg.gkWeights);
 function saveCfg(){store.set('cfg',S.cfg);}
-const newFilters=()=>({fitRules:[],ratRules:[],name:'',club:'',nation:'',league:'',avail:'',hideNo:false,nonForeign:false,maxPen:'30',ageMin:'',ageMax:'',caMin:'',caMax:'',paMin:'',paMax:'',valMin:'',valMax:'',wageMin:'',wageMax:'',endMax:'',pos:{},rules:[],short:false});
+const newFilters=()=>({fitRules:[],ratRules:[],name:'',club:'',regen:false,nation:'',league:'',avail:'',hideNo:false,nonForeign:false,maxPen:'30',ageMin:'',ageMax:'',caMin:'',caMax:'',paMin:'',paMax:'',valMin:'',valMax:'',wageMin:'',wageMax:'',endMax:'',pos:{},rules:[],short:false});
 S.filters=newFilters();
 
 /* ---------- columns ---------- */
@@ -1089,6 +1183,14 @@ function buildCols(){
   A('end','Contract ends',p=>contractEnds(p),{num:true,fmt:(v,p)=>fmtDate(p.endD,p.endM,p.endY),def:true});
   A('join','Joined',p=>p.joinY*10000+p.joinM*100+p.joinD,{num:true,fmt:(v,p)=>fmtDate(p.joinD,p.joinM,p.joinY)});
   A('foreign','Foreign',p=>fgnFor(p)?1:0,{fmt:v=>v?'Foreign':'',tip:'The game counts him as Foreign for your club (set in the Role finder) or, with no club set, for any club in a country with the rule. Foreign players are limited in the match-day squad in some leagues.'});
+  A('regen','Regen',p=>p.regen?1:0,{fmt:v=>v?'Regen':'',tip:'A player the game created to replace one who left (see the Regens tab)'});
+  A('rg_of','Regen of',p=>p.regen&&p.regen.top?p.regen.top.rec['First Name'].replace(/\*/g,'').trim()+' '+p.regen.top.rec['Second Name']:(p.regen?'zz Not found':''),{tip:'The player he replaced, from the starting database. Click for the comparison.'});
+  A('rg_conf','Match',p=>p.regen?({likely:3,uncertain:2,none:1})[p.regen.conf]:0,{num:true,fmt:v=>v===3?'Matched':v===2?'Uncertain':v===1?'Not found':'',tip:'How sure the tool is about who he replaced'});
+  A('rg_match','Agree',p=>p.regen&&p.regen.top&&p.regen.top.known?Math.round(100*p.regen.top.agree/p.regen.top.known):-1,{num:true,fmt:v=>v<0?'–':v+'%',tip:'Share of the compared attributes that are identical to the replaced player\'s starting values. Players develop, so some difference is normal.'});
+  A('rg_cmp','Attributes checked',p=>p.regen&&p.regen.top?p.regen.top.known:-1,{num:true,fmt:v=>v<0?'–':v+' / 22',tip:'How many of the 22 attributes could be checked against the retired player. The starting database leaves some attributes blank for some players, and Character and Consistency are not compared because the game re-rolls them for a regen.'});
+  A('rg_oclub','Club then',p=>p.regen&&p.regen.top?(p.regen.top.rec['Current Club']||'').replace(/^\*\s*/,''):'',{tip:'His club at the start of the game'});
+  A('rg_oca','CA then',p=>p.regen&&p.regen.top?dbAbil(p.regen.top.rec.Ability):-1,{num:true,fmt:v=>v>0?v:'–',tip:'His Current Ability at the start of the game (blank for some players)'});
+  A('rg_opa','PA then',p=>p.regen&&p.regen.top?dbAbil(p.regen.top.rec.Potential):-1,{num:true,fmt:v=>v>0?v:'–',tip:'His Potential Ability at the start of the game (blank for some players)'});
   A('avail','Status',p=>availUn(p.avail)?99:p.avail,{fmt:v=>availLabel(v>=99?10:v),def:true});
   A('wanted','Wanted by',p=>p.wanted,{num:true,tip:'Probably the number of clubs wanting him'});
   A('rep','Reputation',p=>p.rep,{num:true});
@@ -1120,6 +1222,10 @@ function visibleCols(){
     let at=cols.findIndex(c=>c.id==='bestsq');if(at<0)at=cols.findIndex(c=>c.id==='rating');
     cols.splice(at+1,0,...extra);
   }
+  if(S.filters&&S.filters.regen){
+    const extra=['rg_of'].map(id=>COLS.find(x=>x.id===id)).filter(c=>c&&!cols.includes(c));
+    const at=cols.findIndex(c=>c.id==='name');cols.splice(at<0?0:at+1,0,...extra);
+  }
   return cols;
 }
 
@@ -1135,6 +1241,7 @@ function filterPlayers(list,f){
   applyEngine();S.inc=null;
   return list.filter(p=>{
     if(f.short&&!S.short.has(plKey(p)))return false;
+    if(f.regen&&!p.regen)return false;
     if(nm&&!p._n.includes(nm))return false;
     if(cl&&!p._c.includes(cl))return false;
     if(f.nation&&p.nation!==f.nation)return false;
@@ -1182,7 +1289,8 @@ function cellText(c,p){const v=c.get(p);return c.fmt?c.fmt(v,p):v;}
 const PAGE=100;
 function resultsTable(rows,onChange,opts){
   opts=opts||{};
-  const cols=visibleCols();const sorted=sortRows(rows,cols);
+  let cols;if(opts.cols){S.inc=null;applyEngine();cols=opts.cols.map(id=>COLS.find(c=>c.id===id)).filter(Boolean);}else cols=visibleCols();
+  const sorted=sortRows(rows,cols);
   const pages=Math.max(1,Math.ceil(sorted.length/PAGE));if(S.page>=pages)S.page=pages-1;
   const slice=sorted.slice(S.page*PAGE,S.page*PAGE+PAGE);
   const mv=!opts.noMove;
@@ -1195,13 +1303,26 @@ function resultsTable(rows,onChange,opts){
       if(c.id==='avail'){const v=p.avail;return h('td',null,h('span',{class:'tag '+(availUn(v)?'bad':'good')},availLabel(v)));}
       if(c.id==='club')return h('td',null,h('span',{class:'link',onclick:()=>openSquadFor(p.clubId)},p.club));
       if(c.id==='pos')return h('td',null,posEl(p));
+      if(c.id==='rg_of')return h('td',null,p.regen?h('span',{class:'link',style:S.tab==='regens'?'':'color:#d9730d;font-weight:600',onclick:()=>openRegen(p)},c.get(p).replace(/^zz /,'')):'',p.regen&&p.regen.conf==='uncertain'?h('span',{class:'tag warn',style:'margin-left:6px',title:'Two or more players in the database fit equally well. Click to see them.'},'uncertain'):'');
+      if(c.id==='rg_conf'){const v=c.get(p);return h('td',{class:'ctr'},v?h('span',{class:'tag '+(v===3?'good':v===2?'warn':'')},c.fmt(v)):'');}
       const t=cellText(c,p);return h('td',{class:colAlign(c)+(c.fit&&c.get(p)>=0?' '+fitCls(c.get(p)):'')+(c.cls?' '+c.cls(c.get(p)):'')},t);
     })));
+  let gHead=null;
+  if(opts.groups){
+    const gi=new Map();opts.groups.forEach((g,i)=>g.ids.forEach((id,k)=>gi.set(id,{i,start:k===0,g})));
+    const tag=(el,c)=>{const x=gi.get(c.id);if(x){el.classList.add('g'+x.i);if(x.start)el.classList.add('gs');}};
+    [...thead.children].slice(1).forEach((th,k)=>tag(th,cols[k]));
+    body.forEach(tr=>[...tr.children].slice(1).forEach((td,k)=>tag(td,cols[k])));
+    const cells=[];let k=0;
+    while(k<cols.length){const x=gi.get(cols[k].id);let n=1;while(k+n<cols.length&&(gi.get(cols[k+n].id)||{}).i===(x||{}).i&&!(gi.get(cols[k+n].id)||{}).start)n++;
+      cells.push(h('th',{colspan:n+(k===0?1:0),class:'grp'+(x?' g'+x.i+' gs':''),title:x?x.g.tip||'':''},x?x.g.label:''));k+=n;}
+    gHead=h('tr',{class:'grow'},cells);
+  }
   const pager=h('div',{class:'row small',style:'margin-top:6px;align-items:center'},
     h('button',{class:'b',disabled:S.page<=0,onclick:()=>{S.page--;onChange();}},'‹ Prev'),
     h('span',null,'Page '+(S.page+1)+' of '+pages+'  ·  '+rows.length.toLocaleString()+' players'),
     h('button',{class:'b',disabled:S.page>=pages-1,onclick:()=>{S.page++;onChange();}},'Next ›'));
-  return h('div',null,h('div',{class:'scroll'},h('table',{class:'t fz3'},h('thead',null,thead),h('tbody',null,body))),pager,h('div',{class:'small mute',style:'margin-top:4px'},'Positions: solid = natural, faded = can cover; chips after the | are sides (L left, C centre, R right). Fit colours: green ≥ '+S.cfg.fitGood+', orange ≥ '+S.cfg.fitOk+', red below.'));
+  return h('div',null,h('div',{class:'scroll'},h('table',{class:'t fz3'+(gHead?' grouped':'')},h('thead',null,gHead,thead),h('tbody',null,body))),pager,h('div',{class:'small mute',style:'margin-top:4px'},'Positions: solid = natural, faded = can cover; chips after the | are sides (L left, C centre, R right). Fit colours: green ≥ '+S.cfg.fitGood+', orange ≥ '+S.cfg.fitOk+', red below.'));
 }
 function toggleShort(p){const k=plKey(p);S.short.has(k)?S.short.delete(k):S.short.add(k);store.set('short',[...S.short]);}
 
@@ -1223,13 +1344,13 @@ async function importShortlist(file,say){
     return true;
   }catch(e){say('That file could not be read as a shortlist: '+e.message+'. Choose a file made with Export shortlist.');return false;}
 }
-function exportCsv(rows){
-  const cols=visibleCols().filter(c=>c.id!=='star');const sorted=sortRows(rows,cols);
+function exportCsv(rows,ids,fname){
+  const cols=(ids?ids.map(id=>COLS.find(c=>c.id===id)).filter(Boolean):visibleCols()).filter(c=>c.id!=='star');const sorted=sortRows(rows,cols);
   const esc=v=>{v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const lines=[cols.map(c=>esc(c.label)).join(',')];
-  for(const p of sorted)lines.push(cols.map(c=>esc(c.id==='value'?p.value:c.id==='wage'?p.wage:c.id==='avail'?availLabel(p.avail):cellText(c,p))).join(','));
+  for(const p of sorted)lines.push(cols.map(c=>esc(c.id==='value'?p.value:c.id==='wage'?p.wage:c.id==='avail'?availLabel(p.avail):c.id==='rg_of'?String(c.get(p)).replace(/^zz /,''):cellText(c,p))).join(','));
   const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv'});
-  const a=h('a',{href:URL.createObjectURL(blob),download:'cm9798_players.csv'});document.body.append(a);a.click();a.remove();
+  const a=h('a',{href:URL.createObjectURL(blob),download:fname||'cm9798_players.csv'});document.body.append(a);a.click();a.remove();
 }
 
 /* ---------- player page ---------- */
@@ -1248,6 +1369,7 @@ function openPlayer(p){
   const m=modal([
     h('h2',{style:'margin:0 0 4px'},p.name,' ',h('span',{class:'star'+(S.short.has(plKey(p))?' on':''),onclick:e=>{toggleShort(p);e.target.classList.toggle('on');}},'★')),
     h('div',{class:'mute'},p.age+' years · '+p.nation+' · ',h('span',{class:'link',onclick:()=>{m.remove();openSquadFor(p.clubId);}},p.club),p.league?' · '+p.league:''),
+    p.regen?h('div',{class:'small',style:'margin-top:4px'},h('span',{class:'tag '+(p.regen.conf==='likely'?'good':p.regen.conf==='uncertain'?'warn':'')},'Regen'),' ',p.regen.top?h('span',null,'of ',h('span',{class:'link',onclick:()=>{m.remove();openRegen(p);}},regName(p.regen.top.rec)),' ('+(p.regen.conf==='likely'?'matched':'uncertain')+')'):h('span',{class:'link',onclick:()=>{m.remove();openRegen(p);}},'replaced player not found')):null,
     h('div',{class:'pw-tiles'},
       [['Current Ability',p.ca,'pw-big'],['Potential Ability',p.pa,'pw-big'],['Rating',pct(ratingBest(p).v),'pw-big','at '+bestLabel(ratingBest(p)),'t'+ratCls(ratingBest(p).v)],isGK?['Best role fit','N/A','pw-big mute','goalkeeper']:['Best role fit',pct(roleFitR(p,S.cfg,bestRole(p,S.cfg))),'pw-big','as '+ROLE_LABEL[bestRole(p,S.cfg)],'t'+fitCls(roleFitR(p,S.cfg,bestRole(p,S.cfg)))]].map(([l,v,c,sub,acc])=>h('div',{class:'pw-tile'+(acc?' '+acc:'')},h('div',{class:'pw-l'},l),h('div',{class:c},v),sub?h('div',{class:'pw-sub'},sub):null))),
     h('div',{class:'pw-groups'},
@@ -1355,6 +1477,7 @@ function renderScout(root){
       h('div',{class:'chk'},
         h('label',{title:'Hides players the game counts as Foreign for your club. The game exempts the EU nations plus Norway, Iceland, Switzerland, Finland, Luxembourg, Cyprus, Malta and the Faroe Islands. English and Scottish clubs also exempt Jamaica; Portuguese clubs also exempt Brazil, Angola and Mozambique. Uses "Your club" (Role finder) if you have set one, otherwise the plain exempt list.'},h('input',{type:'checkbox',checked:f.nonForeign||f.euOnly,onchange:e=>{f.nonForeign=e.target.checked;f.euOnly=false;S.page=0;refreshScout();}}),'Non Foreign'),
         h('label',null,h('input',{type:'checkbox',checked:f.hideNo,onchange:e=>{f.hideNo=e.target.checked;S.page=0;refreshScout();}}),'Hide unavailable'),
+        h('label',{title:'Only players the game created to replace a player who left. Needs PLAYERS.DB1; see the Regens tab.'},h('input',{type:'checkbox',checked:!!f.regen,onchange:e=>{f.regen=e.target.checked;S.page=0;refreshScout();}}),'Is regen'),
         h('label',null,h('input',{type:'checkbox',checked:f.short,onchange:e=>{f.short=e.target.checked;S.page=0;refreshScout();}}),'Shortlist only')))),
     sec(2,'Player profile','',fl(
       rng('Age',numInput(f,'ageMin','min'),numInput(f,'ageMax','max')),
@@ -1394,6 +1517,95 @@ function refreshScout(){
   if(!scoutBox)return;const rows=filterPlayers(S.world.players,S.filters);
   if(scoutCount)scoutCount.textContent=rows.length.toLocaleString()+(rows.length===1?' player':' players');
   scoutBox.replaceChildren(resultsTable(rows,refreshScout));
+}
+
+
+/* ---------- Regens tab ---------- */
+const RG_COLS=['star','rg_of','rg_oclub','rg_oca','rg_opa','name','club','nation','age','pos','ca','pa','value','wage','rg_cmp'];
+const RG_GROUPS=[{label:'Retired Player',tip:'The player the regen replaced, as he was at the start of the game (from PLAYERS.DB1)',ids:['rg_of','rg_oclub','rg_oca','rg_opa']},
+  {label:'Regen Player',tip:'The player now in your save',ids:['name','club','nation','age','pos','ca','pa','value','wage']},
+  {label:'Check',tip:'How many attributes could be compared',ids:['rg_cmp']}];
+const regName=r=>(r['First Name']||'').replace(/\*/g,'').trim()+' '+(r['Second Name']||'');
+function regSearchText(p){return p.regen?[p.name].concat(p.regen.cands.map(c=>regName(c.rec))).join(' ').toLowerCase():'';}
+let rgBox,rgCount;
+function renderRegens(root){
+  const W=S.world,R=W.regens||{list:[],ok:false};
+  if(!S.rg)S.rg={q:'',conf:'',nation:'',ageMin:'',ageMax:'',caMin:'',caMax:'',paMin:'',paMax:'',valMin:'',valMax:'',pos:''};
+  const f=S.rg;
+  if(!R.ok){
+    root.append(h('div',{class:'panel'},h('h3',null,'Regens'),
+      h('p',null,R.total&&!W.regens.anchors&&!R.list.length?'This tab needs PLAYERS.DB1 from the same game as your save.':'The regen finder could not line this save up with PLAYERS.DB1, so it is switched off instead of guessing.'),
+      h('p',{class:'small mute'},'Only '+(R.anchors||0).toLocaleString()+' of '+(R.total||0).toLocaleString()+' players in the save were found in PLAYERS.DB1. PLAYERS.DB1 sits in your Data folder and must be the one that came with this game. Choose the folder again with it included.')));
+    return;
+  }
+  const nations=[...new Set(R.list.map(p=>p.nation))].sort();
+  const cnt=k=>R.list.filter(p=>p.regen.conf===k).length;
+  const num2=(key,ph,txt)=>h('input',{type:txt?'text':'number',placeholder:ph,value:f[key],oninput:e=>{f[key]=e.target.value;S.page=0;refreshRegens();}});
+  const two=(lbl,a,b)=>h('label',{class:'f'},lbl,h('span',{class:'two'},a,b));
+  rgCount=h('h3',{style:'margin:0'},'');
+  const tools=h('div',{class:'panel rgp'},
+    h('div',{class:'rgh'},
+      h('div',null,rgCount,h('div',{class:'small mute',style:'margin-top:4px;max-width:760px'},
+        'Players the game created to replace players who left at a season end: ',h('b',null,cnt('likely').toLocaleString()+' matched to a retired player'),', '+cnt('uncertain').toLocaleString()+' uncertain (flagged), '+cnt('none').toLocaleString()+' with no retired player found. Click a retired player to compare attributes. Click a column heading to sort.')),
+      h('div',{class:'rgb'},h('button',{class:'b',onclick:()=>{S.rg=null;S.page=0;render();}},'Reset'),h('button',{class:'b p',onclick:()=>exportCsv(regRows(),RG_COLS,'cm9798_regens.csv')},'Export CSV'))),
+    h('div',{class:'rgf'},
+      h('label',{class:'f rgs'},'Search',h('input',{type:'text',value:f.q,placeholder:'Regen or retired player name…',oninput:e=>{f.q=e.target.value;S.page=0;refreshRegens();}})),
+      h('label',{class:'f'},'Nation',selectOf(nations,f.nation,v=>{f.nation=v;S.page=0;refreshRegens();})),
+      h('label',{class:'f'},'Position',selectOf([['gk','Goalkeeper'],['def','Defender'],['mid','Midfielder'],['att','Attacker']],f.pos,v=>{f.pos=v;S.page=0;refreshRegens();})),
+      h('label',{class:'f'},'Flagged',selectOf([['uncertain','Uncertain only'],['none','Not found only']],f.conf,v=>{f.conf=v;S.page=0;refreshRegens();},'All')),
+      two('Age',num2('ageMin','min'),num2('ageMax','max')),
+      two('Current ability (CA)',num2('caMin','min'),num2('caMax','max')),
+      two('Potential (PA)',num2('paMin','min'),num2('paMax','max')),
+      two('Value (£)',num2('valMin','min',1),num2('valMax','max',1))));
+  rgBox=h('div',{class:'rb'});
+  root.append(tools,rgBox);refreshRegens();
+}
+function regRows(){
+  const R=S.world.regens.list,f=S.rg;const q=f.q.trim().toLowerCase();const vMax=pm(f.valMax),vMin=pm(f.valMin);
+  return R.filter(p=>{
+    if(q&&!regSearchText(p).includes(q))return false;
+    if(f.conf&&p.regen.conf!==f.conf)return false;
+    if(f.nation&&p.nation!==f.nation)return false;
+    if(f.pos){const g=p.pos[0]>=2?'gk':p.pos[2]>=2||p.pos[1]>=2||p.pos[3]>=2?'def':p.pos[6]>=2?'att':p.pos[4]>=2||p.pos[5]>=2?'mid':'';if(g!==f.pos)return false;}
+    if(f.ageMin!==''&&p.age<Number(f.ageMin))return false;if(f.ageMax!==''&&p.age>Number(f.ageMax))return false;
+    if(f.caMin!==''&&p.ca<Number(f.caMin))return false;if(f.caMax!==''&&p.ca>Number(f.caMax))return false;
+    if(f.paMin!==''&&p.pa<Number(f.paMin))return false;if(f.paMax!==''&&p.pa>Number(f.paMax))return false;
+    if(vMax!=null&&p.value>vMax)return false;
+    if(vMin!=null&&p.value<vMin)return false;
+    return true;});
+}
+function refreshRegens(){
+  if(!rgBox)return;const rows=regRows();
+  if(rgCount)rgCount.textContent=rows.length.toLocaleString()+(rows.length===1?' regen':' regens');
+  rgBox.replaceChildren(resultsTable(rows,refreshRegens,{cols:RG_COLS,noMove:true,groups:RG_GROUPS}));
+}
+function openRegen(p,pick){
+  const rg=p.regen;if(!rg)return;
+  let cur=pick||0;const box=h('div',null);
+  function draw(){
+    const c=rg.cands[cur];
+    const candList=rg.cands.length>1?h('div',{class:'row',style:'flex-wrap:wrap;gap:6px;margin:8px 0'},rg.cands.map((x,i)=>h('button',{class:'b sm'+(i===cur?' p':''),onclick:()=>{cur=i;draw();}},regName(x.rec)+' ('+(x.known?x.agree+'/'+x.known:'no stats')+')'))):h('span');
+    let body;
+    if(!c){body=h('p',null,'No replaced player was found. '+(rg.gapSize?'The starting database has '+rg.gapSize+' player'+(rg.gapSize===1?' in his slot who is':'s in his slot who are')+' missing from the save, but none share his nationality and position.':'The starting database has no player missing from his slot.')+' This usually means the player he replaced was not in the starting database (for example, he was a regen himself or a player added later).');}
+    else{
+      const r=c.rec;
+      const dbv=a=>{const f=dbField(a);return f?r[f]:0;};
+      body=h('div',null,
+        h('div',{class:'small mute'},'Replaced player, as he was at the start of the game (starting database)'),
+        h('h3',{style:'margin:2px 0'},regName(r)),
+        h('div',{class:'mute small'},[r.Nation,r['Date of Birth']?'born '+r['Date of Birth']:'',r['Current Club']?'club then: '+r['Current Club']:'',r.Ability?'CA then '+dbAbil(r.Ability):'',r.Potential?'PA then '+dbAbil(r.Potential):''].filter(Boolean).join(' · ')),
+        h('table',{class:'t',style:'width:auto;margin-top:10px'},h('tr',null,['Attribute',regName({'First Name':p.first,'Second Name':p.last})+' (now)',regName(r)+' (start)',''].map(x=>h('th',{style:'cursor:default'},x))),
+          ATTRS.map(a=>{const v0=dbv(a),v1=p.attr[a];const known=v0>0;return h('tr',null,h('td',{class:'mute'},a),h('td',{class:'num',style:'color:'+attrColor(v1)+';font-weight:700'},v1),h('td',{class:'num',style:known?'':'color:var(--mute)'},known?v0:'–'),h('td',{style:'text-align:center'},known?(v0===v1?'✓':Math.abs(v0-v1)===1?'≈':''):''));})));
+    }
+    const ex=cur===0&&rg.cands.length>1?'':'';
+    box.replaceChildren(
+      h('h2',{style:'margin:0 0 4px'},p.name,' ',h('span',{class:'tag '+(rg.conf==='likely'?'good':rg.conf==='uncertain'?'warn':'')},rg.conf==='likely'?'Matched':rg.conf==='uncertain'?'Uncertain':'Not found')),
+      h('div',{class:'mute'},p.age+' years · '+p.nation+' · '+p.club+' · CA '+p.ca+' · PA '+p.pa),
+      h('p',{class:'small',style:'max-width:620px'},rg.nCand>1?rg.nCand+' players in his slot could be the one he replaced (same nationality and position). They are ranked by how many attributes still match. A player he replaced can have changed since the start of the game, and the starting database leaves some attributes blank (–), so those cannot be checked.':rg.nCand===1?'Only one player in his slot is a fit (same nationality and position).':''),
+      candList,body,
+      c?h('div',{class:'small mute',style:'margin-top:10px;max-width:620px'},'A tick means the attribute is identical and ≈ means it is one point out. Players develop, so some difference is normal. Character and Consistency are left out because the game re-rolls them for a regen.'):h('span'));
+  }
+  draw();modal(box);
 }
 
 /* ---------- Shortlist ---------- */
@@ -1440,6 +1652,7 @@ function leagueRef(mode){
     for(const c of rivals){
       const res=solveSquad(W.byClub[c.id],shape,S.cfg,new Set());if(res.error)continue;
       clubAvg.push(mean(res.slots.map(s=>s.adj)));
+      if(res.gk){const g=adjusted(res.gk,S.cfg,7,3);const GL=lines.Goalkeeper=lines.Goalkeeper||{clubAvg:[],starters:[]};GL.clubAvg.push(g);GL.starters.push(g);}
       const per={};for(const s of res.slots){(per[lineOf(s.row,mode)]=per[lineOf(s.row,mode)]||[]).push(s.adj);}
       for(const [ln,v] of Object.entries(per)){const L=lines[ln]=lines[ln]||{clubAvg:[],starters:[]};L.clubAvg.push(mean(v));L.starters.push(...v);}
     }
@@ -1479,14 +1692,17 @@ function leagueView(res){
   }
   if(mine.error)return {panel:h('div',{class:'panel'},head('League reference'),h('p',{class:'small mute'},'Your squad does not have enough outfield players for this shape.')),bands};
   const per={};for(const s of mine.slots){(per[lineOf(s.row,mode)]=per[lineOf(s.row,mode)]||[]).push(s.adj);}
+  if(mine.gk){setEngine(evalCtx(ref.shape));try{per.Goalkeeper=[adjusted(mine.gk,S.cfg,7,3)];}finally{setEngine(prev);}}
   const all=mean(mine.slots.map(s=>s.adj)),rank=1+ref.overall.vals.filter(v=>v>all).length;
   const row=(label,b,you,rk,n)=>{const nm=bandName(b,you);
     return h('tr',null,h('td',null,label),h('td',{class:'c'},pct(you)),h('td',{class:'c'},pct(b.p50)),h('td',{class:'c'},pct(b.top6)),h('td',{class:'c'},rk+' of '+n),h('td',{class:'c'},h('span',{class:'tag '+bandCls(nm)},nm)),h('td',{style:'min-width:220px'},scaleBar(b,you)));};
   const rows=[row('Whole team',ref.overall,all,rank,ref.n+1)];
-  for(const ln of ['Defence','Midfield','Attacking midfield','Strikers']){if(!per[ln]||!ref.lines[ln])continue;const y=mean(per[ln]);const L=ref.lines[ln];rows.push(row(ln,L,y,1+L.vals.filter(v=>v>y).length,L.vals.length+1));}
+  for(const ln of ['Goalkeeper','Defence','Midfield','Attacking midfield','Strikers']){if(!per[ln]||!ref.lines[ln])continue;const y=mean(per[ln]);const L=ref.lines[ln];rows.push(row(ln,L,y,1+L.vals.filter(v=>v>y).length,L.vals.length+1));}
   const shapeTxt=mode==='f442'?'a standard 4-4-2 (4 defenders, 4 midfielders, 2 strikers), including your own squad':'your formation';
-  return {bands,panel:h('div',{class:'panel'},head('League reference: '+ref.league),
-    h('div',{class:'small mute',style:'margin-bottom:6px'},h('b',null,'Promoted or relegated? '),'The league used here updates after the end-of-season shortlisting. ','Every club\'s best 11 in '+shapeTxt+', starters only. Bands use the spread of the other clubs: below average = bottom quarter, strong = top quarter, elite = top 10%. On the bar: black = you, grey tick = league median, blue tick = average of the top six clubs.'+(mode==='f442'?' The "vs league" column in the Best 11 compares each player with the league\'s starters on the matching line (AM counts as midfield).':'')),
+  let gkBand=null;
+  if(!res.error&&res.gk&&ref.lines.Goalkeeper){setEngine(evalCtx(ref.shape));try{gkBand=bandName(ref.lines.Goalkeeper.sb,adjusted(res.gk,S.cfg,7,3));}catch(e){gkBand=null;}finally{setEngine(prev);}}
+  return {bands,gkBand,panel:h('div',{class:'panel'},head('League reference: '+ref.league),
+    h('div',{class:'small mute',style:'margin-bottom:6px'},h('b',null,'Promoted or relegated? '),'The league used here updates after the end-of-season shortlisting. ','Every club\'s best 11 in '+shapeTxt+', starters only (including the goalkeeper, shown on its own line and not counted in the whole-team figure). Bands use the spread of the other clubs: below average = bottom quarter, strong = top quarter, elite = top 10%. On the bar: black = you, grey tick = league median, blue tick = average of the top six clubs.'+(mode==='f442'?' The "vs league" column in the Best 11 compares each player with the league\'s starters on the matching line (AM counts as midfield).':'')),
     h('div',{class:'legend'},h('b',null,'How to read "Where you sit":'),
       h('span',null,h('i',{class:'lk you'}),'You'),h('span',null,h('i',{class:'lk med'}),'League median'),h('span',null,h('i',{class:'lk top6'}),'Average of the top six clubs'),
       h('span',{class:'sep'},'Bar colours, from the lowest club to the highest:'),
@@ -1669,7 +1885,7 @@ function refreshSquad(){
   else{
     const tbl=h('table',{class:'t pk'},h('thead',null,h('tr',null,['Slot','Player','Penalty','CA','Cond','Role fit','Rating','vs league','Next best (penalty, drop)'].map((t,k)=>h('th',{class:k>=2&&k<=7?'c':'',style:'cursor:default',title:t==='Cond'?'Physical condition, as the game shows it. The best available 11 avoids players under 90% and prefers those at 95% or more.':''},t)))),
       h('tbody',null,
-        gk?h('tr',null,h('td',null,'GK'),h('td',null,h('span',{class:'link',onclick:()=>openPlayer(gk)},gk.name),fgnTag(gk,fr),roleTags(gk,roles)),h('td',{class:'c'},h('span',{class:'tag '+(penalty(gk,7,3)===0?'good':'bad')},Math.round(penalty(gk,7,3)))),h('td',{class:'c'},gk.ca),h('td',{class:'c '+condCls(gk.cond)},gk.cond+'%'),h('td',{class:'c mute'},'N/A'),h('td',{class:'c '+ratCls(adjusted(gk,S.cfg,7,3))},pct(adjusted(gk,S.cfg,7,3))),h('td',{class:'c'},''),h('td',null,(res.gkReps||[]).map(r=>r.player.last+' ('+Math.round(r.penalty)+', '+dropTxt(adjusted(gk,S.cfg,7,3)-r.adj)+' pts'+condNote(r.player)+')').join(' · '))):null,
+        gk?h('tr',null,h('td',null,'GK'),h('td',null,h('span',{class:'link',onclick:()=>openPlayer(gk)},gk.name),fgnTag(gk,fr),roleTags(gk,roles)),h('td',{class:'c'},h('span',{class:'tag '+(penalty(gk,7,3)===0?'good':'bad')},Math.round(penalty(gk,7,3)))),h('td',{class:'c'},gk.ca),h('td',{class:'c '+condCls(gk.cond)},gk.cond+'%'),h('td',{class:'c mute'},'N/A'),h('td',{class:'c '+ratCls(adjusted(gk,S.cfg,7,3))},pct(adjusted(gk,S.cfg,7,3))),h('td',{class:'c'},lv.gkBand?h('span',{class:'tag '+bandCls(lv.gkBand)},lv.gkBand):''),h('td',null,(res.gkReps||[]).map(r=>r.player.last+' ('+Math.round(r.penalty)+', '+dropTxt(adjusted(gk,S.cfg,7,3)-r.adj)+' pts'+condNote(r.player)+')').join(' · '))):null,
         res.slots.map((s,i)=>i).sort((a,b)=>(res.slots[a].row-res.slots[b].row)||(res.slots[a].col-res.slots[b].col)).map(i=>{const s=res.slots[i];return h('tr',null,h('td',null,slotLabel(s.row,s.col)),h('td',null,h('span',{class:'link',onclick:()=>openPlayer(s.player)},s.player.name),fgnTag(s.player,fr),roleTags(s.player,roles)),
           h('td',{class:'c'},h('span',{class:'tag '+(s.penalty===0?'good':s.penalty<=20?'warn':'bad')},Math.round(s.penalty))),h('td',{class:'c'},s.player.ca),h('td',{class:'c '+condCls(s.player.cond)},s.player.cond+'%'),h('td',{class:'c '+fitCls(roleFitR(s.player,S.cfg,roleKeyFor(s.row,s.col)))},pct(roleFitR(s.player,S.cfg,roleKeyFor(s.row,s.col)))),h('td',{class:'c '+ratCls(s.adj)},pct(s.adj)),h('td',{class:'c'},(()=>{const b=lv.bands&&lv.bands[i];return b?h('span',{class:'tag '+bandCls(b)},b):'';})()),
           h('td',null,res.reps[i].map(r=>r.player.last+' ('+Math.round(r.penalty)+', '+dropTxt(s.adj-r.adj)+' pts'+condNote(r.player)+')').join(' · ')));})))
@@ -1778,10 +1994,10 @@ function renderSettings(root){
 /* ---------- instructions & about ---------- */
 function renderAbout(root){
   const B=(...k)=>h('b',null,...k),li=(...k)=>h('li',null,...k);
-  const IDS={'Quick start':'qs','The numbers: what they mean':'nm','Scout tab':'sc','Assistant Manager tab':'am','Shortlist':'sl','Settings':'st','Known limits':'lm','Troubleshooting':'tr','About':'ab','Thanks and acknowledgements':'th'};
+  const IDS={'Quick start':'qs','The numbers: what they mean':'nm','Scout tab':'sc','Regens tab':'rg','Assistant Manager tab':'am','Shortlist':'sl','Settings':'st','Known limits':'lm','Troubleshooting':'tr','About':'ab','Thanks and acknowledgements':'th'};
   const sec=(t,...k)=>h('div',{class:'panel doc',id:'doc-'+IDS[t]},h('h3',null,t),...k);
   const tbl=(head,rows)=>h('table',{class:'t'},h('thead',null,h('tr',null,head.map(x=>h('th',{style:'cursor:default'},x)))),h('tbody',null,rows.map(r=>h('tr',null,r.map((c,i)=>h('td',{style:i===0?'font-weight:600':''},c))))));
-  const jump=[['Quick start','qs'],['The numbers','nm'],['Scout tab','sc'],['Assistant Manager','am'],['Shortlist','sl'],['Settings','st'],['Known limits','lm'],['Troubleshooting','tr'],['About','ab'],['Thanks','th']];
+  const jump=[['Quick start','qs'],['The numbers','nm'],['Scout tab','sc'],['Regens','rg'],['Assistant Manager','am'],['Shortlist','sl'],['Settings','st'],['Known limits','lm'],['Troubleshooting','tr'],['About','ab'],['Thanks','th']];
   root.append(
     h('div',{class:'panel doc'},h('h3',null,'Introduction'),
       h('p',{class:'byline'},'Created by ',X('RobertoLarcos_6','@RobertoLarcos_6'),' · Contact and updates on X · ',coffeeBtn('coffee inl','☕ Buy me a coffee')),
@@ -1814,6 +2030,23 @@ function renderAbout(root){
         li(B('Role finder.'),' Lets you search for players for specific positions in your tactic. To use it, first load your team in the Assistant Manager and select your formation. Then, in the Scout tab, pick your position slot (GK first, then SW, D, DM, M, AM, ST, and the side) to rank the results by Rating for that position. Set how much position penalty you will accept. ',B('Clear role finder'),' removes this filter but keeps your other filters. The ',B('Upgrade @ slot'),' column shows how much better a player is than your best player in that slot, using the tool\'s engine-based Rating.')),
       h('p',null,'Click a column heading to sort. Click a name for the full player window with coloured attributes, role fit, Rating by position and position ratings by square. Use ',B('★'),' to shortlist, the ',B('⇄'),' boxes to compare up to three players, ',B('Columns…'),' to choose what is shown and ',B('Export CSV'),' to take the list into a spreadsheet.'),
       h('p',null,B('Build your own view.'),' Drag a column heading left or right to move it (the star and name stay in front); your order is remembered in this browser, and ',B('Columns…'),' keeps it when you add or remove columns. ',B('Reset to default'),' in that window puts everything back. ',B('Views'),' saves the columns you show and their order under a name, so you can load a layout (say, one for midfielders) in one click. The ',B('rating columns'),' (DL/DR, DC, DMC, MC, AM, SC, and GK for keepers) are off by default: they give each player\'s Rating if he plays that position, position penalty included, so you can sort or read across and spot players at the rating you want in a given role. Outfield players show N/A in the GK column and keepers only have the GK one.')),
+    sec('Regens tab',
+      h('p',null,B('What a regen is.'),' At the end of each season the game removes a number of players (retirements, but also some younger players) and replaces each one with a brand new player, called a ',B('regen'),'. The regen is given a new name and date of birth but takes over the old player\'s nationality, positions and most of his attributes and ability, so a great player who leaves is often replaced by a similar one, usually younger and cheaper. Regens can be any age, and the game does not tell you who replaced whom.'),
+      h('p',null,B('What the tool does.'),' It finds every regen in your save and shows the player he replaced, with their starting CA and PA, so you can hunt for the young, cheap regens of top players. It needs PLAYERS.DB1 from the same game, in your Data folder. Nothing is stored and it works from a single save.'),
+      h('p',null,B('How it finds them.'),' The game saves each regen in the same place in its player list as the player he replaced, and that list follows the order of PLAYERS.DB1. The tool lines your save up with PLAYERS.DB1 using the players who are still in both. Anyone in the save who is not in PLAYERS.DB1 is a regen. The players missing from the save sit in the gaps, so within each gap the regens and the retired players are paired in order, keeping only pairs with the same nationality and compatible positions. Attributes are never used to decide who is a regen. They are only used to rank the few cases where two players fit equally.'),
+      h('ul',null,
+        li(B('Retired Player / Regen Player.'),' The amber block is the retired player as he was at the start of the game (name, club, CA and PA then). The green block is the regen as he is now. Click the retired player to compare their attributes side by side.'),
+        li(B('Uncertain and Not found.'),' Almost every regen is matched to one retired player, so nothing is shown for those. ',B('Uncertain'),' means two or more players in the same gap fit equally well, usually two players of the same nation and position side by side in the database with no attributes recorded, so the file cannot tell them apart. The best guess is shown and you can switch between them. ',B('Not found'),' means nobody in that place fits, which is rare.'),
+        li(B('Attributes checked.'),' How many of the 22 attributes could be compared with the retired player. The starting database leaves some blank, and Character and Consistency are never compared because the game re-rolls them. Players develop, so attributes drift apart over the seasons. That does not matter: a regen stays a regen, with the same retired player, however much his attributes change, because it rests on his place in the list, his nationality and his positions.'),
+        li(B('Is regen'),' in the Scout filters shows only regens and adds a Regen of column (in orange) to the list. You can also search for the retired player by name on the Regens tab.')),
+      h('p',null,B('Limits.')),
+      h('ul',null,
+        li('It needs the PLAYERS.DB1 that came with the game. If it does not match the save, the tab switches itself off rather than guess.'),
+        li('When a regen later retires and is replaced himself, the new regen shows the original player from that slot, not the earlier regen.'),
+        li('The retired player\'s CA, PA, club and attributes are their starting values at the start of the game, not what they were when they left.'),
+        li('A very small number cannot be matched (Not found), or are a toss-up between two players (Uncertain).'),
+        li('Tested on two real saves either side of one season end: all 1,584 regens were found. 1,555 were matched to one player, 21 were uncertain and 8 not found. Every matched answer that could be checked against the earlier save was right (1,249 of 1,249). Not yet tested across many seasons.')),
+      ),
     sec('Assistant Manager tab',
       h('p',null,'Choose your club, then set your formation. Sections run in this order:'),
       h('ol',null,
@@ -1827,7 +2060,7 @@ function renderAbout(root){
         li(B('Captain and set pieces.'),' Captain, corners, free kicks and penalties, based on the way the engine picks takers.'),
         li(B('Squad.'),' Everyone, with Cond (condition), role fits, Rating, best square and contract. Status tags show XI, Foreign, Inj, Sus, Cup and Int.'),
         li(B('Squad depth.'),' Based on your selected formation, it shows how many players can cover each square, the top three for it, and a count per line. Injured and unavailable players stay in it.'),
-        li(B('League reference.'),' Compares your best 11 with every other club in your league, line by line, in the shape you choose. Bands use the spread of the other clubs: below average is the bottom quarter, strong the top quarter, elite the top 10%.'))),
+        li(B('League reference.'),' Compares your best 11 with every other club in your league, line by line (goalkeeper, defence, midfield and so on), in the shape you choose. The goalkeeper has its own line and is not counted in the whole-team figure. Bands use the spread of the other clubs: below average is the bottom quarter, strong the top quarter, elite the top 10%.'))),
     sec('Shortlist',
       h('p',null,'Click ★ next to a player to add him to your shortlist. Use Compare and Export CSV from this tab too.'),
       h('p',null,B('Where it is saved.'),' Your shortlist is stored in your web browser, for this web address. It is not stored in your game save and it is not uploaded anywhere. That means it is still there next time you open the tool, and it carries over when you load a newer save or when the tool is updated. Players are matched by name and date of birth, so they stay on the list from save to save.'),
@@ -1845,6 +2078,7 @@ function renderAbout(root){
     sec('Known limits',
       h('ul',null,
         li(...DISCLAIMER()),
+        li('Regens: needs PLAYERS.DB1 from the same game as your save. The player he replaced is only named if he was in that starting database, so regens of earlier regens and players added later show as Not found or point to the original player in that slot. A season-end also removes players who did not retire (for example some young players), so "replaced" is more accurate than "retired". Tested on one season end.'),
         li('The goalkeeper blend (70% shot stopping, 15% rushing out, 15% aerial by default) is an estimate. How often each situation reaches a keeper has not been measured.'),
         li('Promotion and relegation: a club\'s division is read from its record in the save. The game appears to update this behind the scenes after the end-of-season shortlisting in June, but in the game the club will still show in its previous league until the game updates on 16 July. Only the leagues loaded in the save follow promotion and relegation; others use the starting database.'),
         li('The current build does not account for positional arrows in the formation selector, but an arrow suitability is provided for each player, based on their Off the ball and Positioning attributes. It assumes the player is at 100% condition: a lower condition reduces their effectiveness with an arrow, and the percentage shown is not adjusted for the Cond column.'),
@@ -1866,8 +2100,8 @@ function renderAbout(root){
         h('p',{class:'small'},'The game sets this up by default. The number in a file name is the save slot: slot 1 files end in 1, slot 2 files end in 2, and so on, so you will only see sets for the slots you have used. The example below shows slot 1, plus one slot 2 set. PLAYERS.DB1, TMDATA.DB1 and GAMESS16.IDX are shared by all saves.'),
         h('pre',{class:'dirlist'},'PLDATA1.S16   TMDATA1.S16   GNDATA1.S16   MGDATA1.S16   CPDATA1.S16     (save slot 1)\nPLDATA2.S16   TMDATA2.S16   GNDATA2.S16   MGDATA2.S16   CPDATA2.S16     (save slot 2)\nGAMESS16.IDX\nPLAYERS.DB1\nTMDATA.DB1'))),
     sec('About',
-      h('p',null,B('Version 1.0'),' (November 2026). A fan-made tool. Not affiliated with or endorsed by the game\'s publisher or developer.'),
-      h('details',{class:'fold'},h('summary',null,'Version history'),h('ul',null,li(B('v1.0'),' (November 2026): first public release. Scout with role finder and engine-based Rating, Assistant Manager with best 11, squad depth and league reference, shortlist and settings.'))),
+      h('p',null,B('Version 1.1'),' (November 2026). A fan-made tool. Not affiliated with or endorsed by the game\'s publisher or developer.'),
+      h('details',{class:'fold'},h('summary',null,'Version history'),h('ul',null,li(B('v1.1'),' (November 2026): new Regens tab and "Is regen" filter in Scout, showing who each regen replaced. Goalkeeper added to the league reference and Best 11 comparison. Tick boxes in Find players aligned.'),li(B('v1.0'),' (November 2026): first public release. Scout with role finder and engine-based Rating, Assistant Manager with best 11, squad depth and league reference, shortlist and settings.'))),
       h('p',null,'Created by ',X('RobertoLarcos_6','@RobertoLarcos_6'),'. Contact and updates on X. If the tool helps you, you can ',coffeeBtn('coffeelink','buy me a coffee'),'.'),
       h('p',null,...DISCLAIMER()),
       h('p',null,'The engine scoring is a port of the game\'s own routines, checked against the original program. The way the match engine uses attributes was also informed by John North\'s "Exploring the Match Engine" article. Everything runs in your browser.')),
@@ -1995,10 +2229,10 @@ function render(){
   const dateIn=h('input',{type:'text',value:fmtDate(W.gameDate[0],W.gameDate[1],W.gameDate[2]),style:'width:78px',title:'Game date used for ages (dd.mm.yy)',onchange:e=>{const m=/^(\d+)\.(\d+)\.(\d+)$/.exec(e.target.value.trim());if(!m)return;const y=+m[3]<100?1900+ +m[3]:+m[3];W.gameDate=[+m[1],+m[2],y];computeAges(W,W.gameDate);render();}});
   hd.append(h('span',{class:'status'},W.slotLabel+' · '+W.players.length.toLocaleString()+' players · game date ',dateIn,' (set it if ages look off)'),
     h('div',{class:'hd-right'},coffeeBtn('coffee hc'),(S.dir?h('button',{class:'b ldbtn',title:'Read this save again from your game folder, keeping your club, filters and shortlist',onclick:e=>reloadSave(e.currentTarget)},'Reload'):null),h('button',{class:'b ldbtn',onclick:()=>{S.world=null;render();}},'Load another save')));
-  const tabs=[['scout','Scout'],['squad','Assistant Manager'],['short','Shortlist ('+S.short.size+')'],['settings','Settings'],['about','Instructions & About']];
-  $('#tabs').replaceChildren(...tabs.map(([k,l])=>h('button',{class:S.tab===k?'on':'',onclick:()=>{S.tab=k;S.page=0;render();}},l)));
+  const tabs=[['scout','Scout'],['squad','Assistant Manager'],['regens','Regens'],['short','Shortlist ('+S.short.size+')'],['settings','Settings'],['about','Instructions & About']];
+  $('#tabs').replaceChildren(...tabs.map(([k,l])=>h('button',{class:S.tab===k?'on':'',onclick:()=>{const prev=S.tab;S.tab=k;S.page=0;if(k==='regens')S.sort={id:'ca',dir:-1};else if(prev==='regens')S.sort={id:'rating',dir:-1};render();}},l)));
   root.append(h('datalist',{id:'clubs'},W.teams.filter(t=>W.byClub[t.id]).map(t=>h('option',{value:t.name}))));
-  if(S.tab==='scout')renderScout(root);else if(S.tab==='squad')renderSquad(root);else if(S.tab==='short')renderShort(root);else if(S.tab==='about')renderAbout(root);else renderSettings(root);
+  if(S.tab==='scout')renderScout(root);else if(S.tab==='squad')renderSquad(root);else if(S.tab==='regens')renderRegens(root);else if(S.tab==='short')renderShort(root);else if(S.tab==='about')renderAbout(root);else renderSettings(root);
 }
 document.addEventListener('DOMContentLoaded',render);
 
