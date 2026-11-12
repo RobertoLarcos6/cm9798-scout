@@ -402,6 +402,8 @@ const POS=['GK','Sweeper','Defence','Anchor','Midfield','Support','Attack','Righ
 const POS_SHORT=['GK','Sw','Def','Anc','Mid','Sup','Att','R','L','C'];
 const BANDS=['Sweeper','Defence','Anchor','Midfield','Support','Attack']; // pitch rows 1..6
 const AVAIL={0:'Available',1:'Transfer listed',2:'Requested transfer',3:'Loan listed',4:'Free agent (no club)',5:'Unavailable',6:'Likely unavailable',10:'Recently signed',11:"Club won't sell (can afford to keep him)",12:'Recently signed',13:'Club has too few goalkeepers to sell',14:'Club squad too small to sell',15:'Loan deal in place',16:'Rival club (will not deal)'};
+/* Brave New World merges some countries into shared leagues; the team database files them under one country, so name the area here. */
+const BNW_LEAGUE_AREA={BN1:'BeNe Liga',BN2:'BeNe Liga',BNL:'BeNe Liga',PD1:'Brazil-Portugal',PD2:'Brazil-Portugal',PNL:'Brazil-Portugal'};
 const LEAGUE_NAMES={EPR:'England: Premier League',ED1:'England: Division 1',ED2:'England: Division 2',ED3:'England: Division 3',ENL:'England: Non-league'};
 
 function u16(d,o){return d[o]|(d[o+1]<<8);}
@@ -440,16 +442,30 @@ function parseDB1(d){
   return {fields,recs};
 }
 
+/* Two save layouts exist. 2.93, v2 and Brave New World: 360 bytes per player, 7 strings + 1466 bytes per team.
+   The unpatched original (2.81): 340 bytes per player (wage and value are whole numbers, not doubles), 6 strings + 1273 bytes per team.
+   fitsLayout walks the records and returns the bytes left over at the end, or null if the walk runs off the file. */
+function fitsLayout(d,nstr,blk){
+  if(d.length<2)return null;const cnt=u16(d,0);let p=2;
+  for(let i=0;i<cnt;i++){for(let k=0;k<nstr;k++){if(p+2>d.length)return null;const L=u16(d,p);if(L>80)return null;p+=2+L;}p+=blk;if(p>d.length)return null;}
+  return d.length-p;
+}
 /* ---- TMDATA{n}.S16: u16 count, then per team 7 strings (u16 length + text) + 1466 byte block ---- */
 function parseTeamsSave(d){
   const cnt=u16(d,0);let p=2;const teams=[];
+  const early=i=>new Error('The team file (TMDATA) stops early: it lists '+cnt+' teams but the data runs out at team '+i+'. The file may be incomplete (still saving or syncing), or from an edition of the game with a different layout.');
+  if(d.length<2)throw new Error('The team file (TMDATA) is empty. If the folder is synced (OneDrive, Dropbox), wait for it to finish downloading, then try again.');
+  const old=fitsLayout(d,7,1466)===null&&fitsLayout(d,6,1273)!==null,NS=old?6:7,BLK=old?1273:1466;
   for(let i=0;i<cnt;i++){
     const ss=[];
-    for(let k=0;k<7;k++){const L=u16(d,p);ss.push(latin(d,p+2,p+2+L));p+=2+L;}
-    const nat=u16(d,p+28);
-    teams.push({id:i,off:p,name:ss[0],short:ss[1],stadium:ss[6],natId:nat,div:d[p+103],rep:d[p+60],capacity:u16(d,p+69),nflag:d[p+0x24],x4f:u16(d,p+0x4f)});
-    p+=1466;
+    for(let k=0;k<NS;k++){if(p+2>d.length)throw early(i);const L=u16(d,p);ss.push(latin(d,p+2,p+2+L));p+=2+L;}
+    if(p+BLK>d.length)throw early(i);
+    const q=old?p-4:p;   // 2.81: these fields sit 4 bytes earlier, and the division byte 16 earlier
+    const nat=u16(d,q+28);
+    teams.push({id:i,off:p,name:ss[0],short:ss[1],stadium:ss[NS-1],natId:nat,div:d[old?p+87:p+103],rep:d[q+60],capacity:u16(d,q+69),nflag:d[q+0x24],x4f:u16(d,q+0x4f)});
+    p+=BLK;
   }
+  teams.old=old;
   return teams;
 }
 
@@ -457,25 +473,35 @@ function parseTeamsSave(d){
 function parsePlayersSave(d){
   const cnt=u16(d,0);let p=2;const out=[];
   const dv=new DataView(d.buffer,d.byteOffset,d.byteLength);
+  const early=i=>new Error('The player file (PLDATA) stops early: it lists '+cnt+' players but the data runs out at player '+i+'. The file may be incomplete (still saving or syncing), or from an edition of the game with a different layout.');
+  if(d.length<2)throw new Error('The player file (PLDATA) is empty. If the folder is synced (OneDrive, Dropbox), wait for it to finish downloading, then try again.');
+  const old=fitsLayout(d,2,360)!==0&&fitsLayout(d,2,340)===0,BLK=old?340:360;
   for(let i=0;i<cnt;i++){
+    if(p+2>d.length)throw early(i);
     let L=u16(d,p);const first=latin(d,p+2,p+2+L);p+=2+L;
+    if(p+2>d.length)throw early(i);
     L=u16(d,p);const last=latin(d,p+2,p+2+L);p+=2+L;
-    const b=p;  // 360 byte block starts here
+    const b=p;  // player block starts here (360 bytes, or 340 in 2.81)
+    if(b+BLK>d.length)throw early(i);
     const pl={idx:i,first,last,name:(first?first+' ':'')+last};
     pl.off=b;pl.natId=u16(d,b+8);pl.clubId=u16(d,b+15);
     pl.dobD=d[b+20];pl.dobM=d[b+21];pl.dobY=1900+d[b+22];
     const b0=d[b+23],b1=d[b+24],b2=d[b+25];
     pl.pos=[b0&3,(b0>>2)&3,(b0>>4)&3,(b0>>6)&3,b1&3,(b1>>2)&3,(b1>>4)&3,(b1>>6)&3,b2&3,(b2>>2)&3];
     pl.ca=u16(d,b+26);pl.pa=u16(d,b+28);pl.rep30=u16(d,b+30);pl.rep=u16(d,b+32);pl.talent=d[b+34];
-    pl.wage=Math.round(dv.getFloat64(b+68,true)*2);
-    pl.value=Math.round(dv.getFloat64(b+122,true)*2);
-    pl.joinD=d[b+76];pl.joinM=d[b+77];pl.joinY=1900+d[b+78];
-    pl.endD=d[b+79];pl.endM=d[b+80];pl.endY=1900+d[b+81];
-    pl.inj=d[b+203];pl.banN=d[b+210];pl.banD=d[b+211];pl.banM=d[b+212];pl.banY=1900+d[b+213];pl.cb=d.slice(b+141,b+141+32);pl.cond=Math.floor(d[b+197]*u16(d,b+198)/10000);pl.banEN=d[b+219];pl.banED=d[b+220];pl.banEM=d[b+221];pl.banEY=1900+d[b+222];pl.sus=false;pl.susE=false;pl.intl=0;pl.avail=d[b+138];pl.availRaw=pl.avail;if(pl.avail===0&&d[b+143]&&d[b+146]&&d[b+148])pl.avail=6;pl.wanted=d[b+139];
-    pl.attr={};for(let a=0;a<24;a++)pl.attr[ATTRS[a]]=d[b+234+a];
+    if(old){pl.wage=dv.getUint32(b+64,true)*2;pl.value=dv.getUint32(b+110,true)*2;}
+    else{pl.wage=Math.round(dv.getFloat64(b+68,true)*2);pl.value=Math.round(dv.getFloat64(b+122,true)*2);}
+    const c=old?b-8:b;   // 2.81: contract dates sit 8 bytes earlier
+    pl.joinD=d[c+76];pl.joinM=d[c+77];pl.joinY=1900+d[c+78];
+    pl.endD=d[c+79];pl.endM=d[c+80];pl.endY=1900+d[c+81];
+    const e=old?b-20:b;   // 2.81: everything from the availability byte on sits 20 bytes earlier
+    pl.inj=d[e+203];pl.banN=d[e+210];pl.banD=d[e+211];pl.banM=d[e+212];pl.banY=1900+d[e+213];pl.cb=d.slice(e+141,e+141+32);pl.cond=Math.floor(d[e+197]*u16(d,e+198)/10000);pl.banEN=d[e+219];pl.banED=d[e+220];pl.banEM=d[e+221];pl.banEY=1900+d[e+222];pl.sus=false;pl.susE=false;pl.intl=0;pl.avail=d[e+138];pl.availRaw=pl.avail;if(pl.avail===0&&d[e+143]&&d[e+146]&&d[e+148])pl.avail=6;pl.wanted=d[e+139];
+    pl.attr={};for(let a=0;a<24;a++)pl.attr[ATTRS[a]]=d[e+234+a];
     out.push(pl);
-    p=b+360;
+    p=b+BLK;
   }
+  out.endGap=d.length-p;
+  out.old=old;
   return out;
 }
 
@@ -519,6 +545,9 @@ function buildWorld(files,slot,gameDate){
   const players=parsePlayersSave(files.pl);
   const teams=parseTeamsSave(files.tm);
   const world={players,teams,warnings:[]};
+  world.old=!!(players.old||teams.old);
+  if(players.old!==teams.old)world.warnings.push('The player and team files look like they come from different versions of the game. Results may be wrong.');
+  if(players.endGap)world.warnings.push('The player file has '+Math.abs(players.endGap)+' bytes '+(players.endGap>0?'more':'fewer')+' than the layout the tool expects. Results may be wrong if this is a different edition of the game.');
   // names for club ids
   const clubName=id=>(teams[id]?teams[id].name:'Club #'+id);
   // league per club from the starting team database (matched by name)
@@ -530,7 +559,7 @@ function buildWorld(files,slot,gameDate){
     const byLong={},byShort={};
     for(const r of t){if(r.Division){byLong[nk(r['UK Long Name'])]=r;if(!byShort[nk(r['UK Short Name'])])byShort[nk(r['UK Short Name'])]=r;}}
     const nat={};for(const r of t)if(r.Division){(nat[r.Division]=nat[r.Division]||{})[r.Nation]=(nat[r.Division][r.Nation]||0)+1;}
-    const label=code=>{if(LEAGUE_NAMES[code])return LEAGUE_NAMES[code];const m=nat[code]||{};let best='',bc=0;for(const k in m)if(m[k]>bc){bc=m[k];best=k;}return (best?best+': ':'')+code;};
+    const label=code=>{if(LEAGUE_NAMES[code])return LEAGUE_NAMES[code];if(files.edition==='bnw'&&BNW_LEAGUE_AREA[code])return BNW_LEAGUE_AREA[code]+': '+code;const m=nat[code]||{};let best='',bc=0;for(const k in m)if(m[k]>bc){bc=m[k];best=k;}return (best?best+': ':'')+code;};
     // The save keeps a current-division byte for every league that is being simulated (255 = not simulated).
     // Learn which starting-database division each byte value means by majority vote, so any loaded league follows promotion and relegation.
     const votes={};
@@ -539,9 +568,9 @@ function buildWorld(files,slot,gameDate){
     for(const b in votes){const e=Object.entries(votes[b]).sort((x,y)=>y[1]-x[1]);const tot=e.reduce((s,x)=>s+x[1],0);if(tot>=6&&e[0][1]/tot>=0.6)divMap[b]=e[0][0];}
     let miss=0;const allNames=new Set();for(const r of t){allNames.add(nk(r['UK Long Name']));allNames.add(nk(r['UK Short Name']));}
     for(const tm of teams){const r=byLong[nk(tm.name)]||byShort[nk(tm.name)];const live=divMap[tm.div];tm.league=live?label(live):(r&&r.Division?label(r.Division):'');tm.nationName=r?r.Nation:'';if(!r&&!divMap[tm.div]&&!allNames.has(nk(tm.name))&&players.some(p=>p.clubId===tm.id))miss++;}
-    if(miss)world.warnings.push(miss+' clubs with players could not be matched to a league (name not found in TMDATA.DB1).');
+    if(miss)world.warnings.push(miss+' clubs with players could not be matched to a league (name not found in '+(files.teamDb||'TMDATA.DB1')+').');
     world.hasLeagues=true;
-  }else{for(const tm of teams){tm.league='';tm.nationName='';}world.warnings.push('TMDATA.DB1 not found: leagues are unavailable.');}
+  }else{for(const tm of teams){tm.league='';tm.nationName='';}world.warnings.push((files.teamDb||'TMDATA.DB1')+' not found: leagues are unavailable.');}
   // nationality id -> name, learned by matching save players to the starting player database
   const natName={};
   if(files.db1players){
@@ -556,15 +585,16 @@ function buildWorld(files,slot,gameDate){
     for(const tm of teams)if(tm.nationName&&natName[tm.natId]===undefined)natName[tm.natId]=tm.nationName;
   }else world.warnings.push('PLAYERS.DB1 not found: nationality names are unavailable.');
   world.natName=natName;
-  world.comps=parseComps(files.cp);makeForeign(world);
+  world.comps=world.old?[]:parseComps(files.cp);makeForeign(world);
   world.setDate=gameDate;
   for(const pl of players){
     pl.club=clubName(pl.clubId);
     pl.league=teams[pl.clubId]?teams[pl.clubId].league:'';
     pl.nation=natName[pl.natId]||('Nation #'+pl.natId);
   }
-  try{world.engine=makeAvailEngine(files,players,teams);}catch(e){world.engine=null;world.warnings.push('Availability rule could not be set up ('+e.message+'); using the old estimate.');}
-  if(!world.engine&&!(files.mg&&files.cp))world.warnings.push('MGDATA'+slot+'.S16 and CPDATA'+slot+'.S16 not found: the game\'s Unavailable rule is off and the older estimate is used.');
+  if(world.old){world.engine=null;world.warnings.push('This save is from the unpatched original game (2.81). Scout, Regens and the squad tools work, but the game\'s Unavailable rule and foreign-player limits are not available for this version: the older estimate is used for availability.');}
+  else try{world.engine=makeAvailEngine(files,players,teams);}catch(e){world.engine=null;world.warnings.push('Availability rule could not be set up ('+e.message+'); using the old estimate.');}
+  if(!world.engine&&!(files.mg&&files.cp))world.warnings.push('MGDATA and CPDATA for this slot not found: the game\'s Unavailable rule is off and the older estimate is used.');
   world.regens={list:[],ok:false,anchors:0,total:players.length};
   if(files.db1players){try{world.regens=computeRegens(players,parseDB1(files.db1players).recs,natName);}catch(e){world.warnings.push('Regens could not be worked out: '+e.message);}}
   computeAges(world,gameDate);
@@ -602,6 +632,11 @@ function computeRegens(players,db,natName){
     if(anchor[i]>=0)continue;const p=players[i];const pn=nn(p.first)+'|'+nn(p.last);
     for(let j=prevA[i]+1;j<nextA[i];j++){if(!used.has(j)&&nn(db[j]['First Name'])+'|'+nn(db[j]['Second Name'])===pn){anchor[i]=j;used.add(j);break;}}
   }
+  // a database player with no date of birth (the game invents one) who is filed out of order: accept him when exactly one unused
+  // record has his name and nation, wherever it sits. Seen in the unpatched original game, whose late database additions are not in list order.
+  {const blank=new Map();db.forEach((r,j)=>{if(used.has(j)||dbKey(r))return;const k=nn(r['First Name'])+'|'+nn(r['Second Name'])+'|'+nn(r.Nation);(blank.get(k)||blank.set(k,[]).get(k)).push(j);});
+   for(let i=0;i<n;i++){if(anchor[i]>=0)continue;const p=players[i];const c=blank.get(nn(p.first)+'|'+nn(p.last)+'|'+nn(natName&&natName[p.natId]));
+     if(c&&c.length===1&&!used.has(c[0])){anchor[i]=c[0];used.add(c[0]);}}}
   const ATT=ATTRS;
   const posOfSave=p=>p.pos.join('');const posOfDb=r=>DB_POS.map(k=>r[k]).join('');
   const score=(p,r)=>{let agree=0,known=0,close=0;
@@ -2004,7 +2039,7 @@ function renderAbout(root){
       h('p',null,B('Welcome to CM97/98 Scout & Assistant.'),' Thanks for trying my tool. It started when I wanted a scouting tool for this much-loved game to help with tactic testing. The only one I could find was Super Scout by Mind Compression. It was fairly limited, but it showed what was possible, so thanks to them. I have always liked Genie Scout on the FM games, so I set out to bring some of that to 97/98.'),
       h('p',null,'As I learned what data the game holds, it grew into more than a scout. It now includes some of the quality-of-life features I like in the newer FM games, such as your squad depth and how your team compares with the rest of the league, so you can see where to strengthen.'),
       h('p',null,'You might use all of it or just a part. Either way, I am sharing it in case it helps your 97/98 save. I plan to keep adding features, and I would welcome feedback and suggestions. You can reach me on X at ',X('RobertoLarcos_6','@RobertoLarcos_6'),'.'),
-      h('p',null,'A real-time scout and squad tool for Championship Manager 97/98 v2. It reads your saved game and lets you search, sort and filter players, applying the match engine\'s own scoring rules to give each player a rating. As well as the Scout, the Assistant Manager gives you detailed insights into your squad and your best 11, based on your tactics.'),
+      h('p',null,'A real-time scout and squad tool for Championship Manager 97/98. It works with the fan-made v2, Brave New World and the original game. It reads your saved game and lets you search, sort and filter players, applying the match engine\'s own scoring rules to give each player a rating. As well as the Scout, the Assistant Manager gives you detailed insights into your squad and your best 11, based on your tactics.'),
       h('p',null,B('It only reads your files. It never writes to your game folder and nothing is uploaded.')),
       h('p',{class:'small'},'Jump to: ',...jump.flatMap(([t,k],n)=>[n?' · ':'',h('span',{class:'link',onclick:()=>{const e=document.getElementById('doc-'+k);e&&e.scrollIntoView({behavior:'smooth',block:'start'});}},t)]))),
     sec('Quick start',
@@ -2090,18 +2125,19 @@ function renderAbout(root){
     sec('Troubleshooting',
       tbl(['Problem','Try this'],[
         ['My save will not load, or looks incomplete','Check the folder you chose has all the files listed below. It does by default, so a missing file is unlikely.'],
-        ['"No save found"','Choose the folder that holds PLDATA#.S16 and TMDATA#.S16, not a parent folder.'],
+        ['"No save found"','Choose the folder that holds PLDATA#.S16 and TMDATA#.S16 (Brave New World: PLDATA#.SNW and TMDATA#.SNW), not a parent folder.'],
         ['Nationalities or leagues missing','PLAYERS.DB1 or TMDATA.DB1 was not in the folder you chose. Choose the whole folder.'],
+        ['Original game, unpatched (2.81)','The tool spots a 2.81 save by itself and reads it. The game\'s Unavailable rule and foreign-player limits are not available for 2.81, so availability uses the older estimate. Use the PLAYERS.DB1 and TMDATA.DB1 from the same game folder as the save, or the Regens tab will be wrong.'],
         ['Everyone looks available','MGDATA and CPDATA were missing. The note in Settings under This save says so.'],
         ['Ages look wrong','Set the game date top right as dd.mm.yy.'],
         ['League reference says no league found','The club name in the save has to match TMDATA.DB1, or the club is in a league the game does not simulate.'],
         ['Settings seem odd','Settings > Default Engine Ratings > Restore, then Reset all to defaults.']]),
       h('details',{class:'fold'},h('summary',null,'Which files must be in the folder?'),
-        h('p',{class:'small'},'The game sets this up by default. The number in a file name is the save slot: slot 1 files end in 1, slot 2 files end in 2, and so on, so you will only see sets for the slots you have used. The example below shows slot 1, plus one slot 2 set. PLAYERS.DB1, TMDATA.DB1 and GAMESS16.IDX are shared by all saves.'),
+        h('p',{class:'small'},'The game sets this up by default. The number in a file name is the save slot: slot 1 files end in 1, slot 2 files end in 2, and so on, so you will only see sets for the slots you have used. The example below shows slot 1, plus one slot 2 set. PLAYERS.DB1, TMDATA.DB1 and GAMESS16.IDX are shared by all saves. Brave New World uses the same set with different names: its save files end in .SNW, its slot list is GAMESSNW.IDX and its team database is TM_BNW.DB1. The tool spots which version a save is from the file names.'),
         h('pre',{class:'dirlist'},'PLDATA1.S16   TMDATA1.S16   GNDATA1.S16   MGDATA1.S16   CPDATA1.S16     (save slot 1)\nPLDATA2.S16   TMDATA2.S16   GNDATA2.S16   MGDATA2.S16   CPDATA2.S16     (save slot 2)\nGAMESS16.IDX\nPLAYERS.DB1\nTMDATA.DB1'))),
     sec('About',
-      h('p',null,B('Version 1.1'),' (November 2026). A fan-made tool. Not affiliated with or endorsed by the game\'s publisher or developer.'),
-      h('details',{class:'fold'},h('summary',null,'Version history'),h('ul',null,li(B('v1.1'),' (November 2026): new Regens tab and "Is regen" filter in Scout, showing who each regen replaced. Goalkeeper added to the league reference and Best 11 comparison. Tick boxes in Find players aligned.'),li(B('v1.0'),' (November 2026): first public release. Scout with role finder and engine-based Rating, Assistant Manager with best 11, squad depth and league reference, shortlist and settings.'))),
+      h('p',null,B('Version 1.2'),' (November 2026). A fan-made tool. Not affiliated with or endorsed by the game\'s publisher or developer.'),
+      h('details',{class:'fold'},h('summary',null,'Version history'),h('ul',null,li(B('v1.2'),' (November 2026): opens Brave New World saves as well as v2. Opens saves from the original game, including the unpatched 2.81 version, which stores its data differently. Clearer messages when a save file cannot be read.'),li(B('v1.1'),' (November 2026): new Regens tab and "Is regen" filter in Scout, showing who each regen replaced. Goalkeeper added to the league reference and Best 11 comparison. Tick boxes in Find players aligned.'),li(B('v1.0'),' (November 2026): first public release. Scout with role finder and engine-based Rating, Assistant Manager with best 11, squad depth and league reference, shortlist and settings.'))),
       h('p',null,'Created by ',X('RobertoLarcos_6','@RobertoLarcos_6'),'. Contact and updates on X. If the tool helps you, you can ',coffeeBtn('coffeelink','buy me a coffee'),'.'),
       h('p',null,...DISCLAIMER()),
       h('p',null,'The engine scoring is a port of the game\'s own routines, checked against the original program. The way the match engine uses attributes was also informed by John North\'s "Exploring the Match Engine" article. Everything runs in your browser.')),
@@ -2121,7 +2157,7 @@ const B0=(...k)=>h('b',null,...k);
 const COFFEE='https://buymeacoffee.com/robertolarcos';
 const coffeeBtn=(cls,label)=>h('a',{class:cls,href:COFFEE,target:'_blank',rel:'noopener',title:'Support the tool: buy me a coffee'},label||'☕ Buy me a coffee');
 const X=(h0,t)=>h('a',{href:'https://x.com/'+h0,target:'_blank',rel:'noopener'},t);
-const DISCLAIMER=()=>[h('b',null,'This version of the tool has been built for use on CM9798 v2'),', created by the X account CM9798 - Remastered (',X('cm9798v2','@cm9798v2'),'). It may or may not work on any other version. A version for the original game will be made available in the near future. Follow me on X ',X('RobertoLarcos_6','@RobertoLarcos_6'),' for updates.'];
+const DISCLAIMER=()=>[h('b',null,'This tool was built on CM9798 v2'),', created by the X account CM9798 - Remastered (',X('cm9798v2','@cm9798v2'),'). It also opens saves from Brave New World and from the original game, both the final 2.93 patch and the unpatched 2.81. The ratings and the Unavailable rule were worked out on v2 and have not been checked separately on the other versions. On 2.81 the Unavailable rule and foreign-player limits are switched off. Follow me on X ',X('RobertoLarcos_6','@RobertoLarcos_6'),' for updates.'];
 function showLoader(){
   const root=$('#view');root.replaceChildren();
   const info=h('div',{id:'loadinfo',class:'small',style:'margin-top:12px'});
@@ -2130,7 +2166,7 @@ function showLoader(){
   const lastBox=h('div',{class:'ld-last'});
   const btns=h('div',{class:'ld-btns'},h('button',{class:'b p big',onclick:()=>pickFolder(()=>dirIn.click())},'Choose game folder…'),dirIn,fileIn);
   const files=h('details',{class:'ld-files'},h('summary',null,'Which files does it need?'),
-    h('p',{class:'small'},'All of these are in your Data folder by default. The number in a file name is the save slot (slot 1 shown; slot 2 files end in 2).'),
+    h('p',{class:'small'},'All of these are in your Data folder by default. The number in a file name is the save slot (slot 1 shown; slot 2 files end in 2). Brave New World saves end in .SNW, with GAMESSNW.IDX and TM_BNW.DB1.'),
     h('pre',{class:'dirlist'},'PLDATA1.S16  TMDATA1.S16  GNDATA1.S16  MGDATA1.S16  CPDATA1.S16\nGAMESS16.IDX  PLAYERS.DB1  TMDATA.DB1'),
     h('p',{class:'small'},'Cannot choose a folder (for example on a phone or tablet)? ',h('span',{class:'link',onclick:()=>fileIn.click()},'Pick the files instead'),'. Select all of the files above for one save slot only.'));
   const path=h('div',{class:'ld-path'},h('span',{class:'small mute'},'Typical location'),h('code',null,'C:\\Users\\<your name>\\Documents\\Games\\CM9798\\cm9798_fan_mode\\cm9798\\Data\\cm9798'));
@@ -2152,13 +2188,17 @@ const idb={
   async get(k){const db=await this.open();return new Promise((res,rej)=>{const t=db.transaction('kv').objectStore('kv').get(k);t.onsuccess=()=>res(t.result);t.onerror=()=>rej(t.error);});},
   async set(k,v){const db=await this.open();return new Promise((res,rej)=>{const t=db.transaction('kv','readwrite').objectStore('kv').put(v,k);t.onsuccess=()=>res();t.onerror=()=>rej(t.error);});}
 };
+/* Slot keys: 1-7 = .S16 saves (v2 and the original game), 101-107 = .SNW saves (Brave New World, same layout as v2). */
+const isNW=k=>k>=100,slotNum=k=>k%100,slotFile=(base,k)=>base+slotNum(k)+(isNW(k)?'.SNW':'.S16');
+function findSlots(files){const slots=[];for(const o of [0,100])for(let n=1;n<=7;n++)if(files[slotFile('PLDATA',o+n)]&&files[slotFile('TMDATA',o+n)])slots.push(o+n);
+  slots.sort((a,b)=>files[slotFile('PLDATA',b)].lastModified-files[slotFile('PLDATA',a)].lastModified);return slots;}
+async function slotNames(files){const names=[];for(const [o,f] of [[0,'GAMESS16.IDX'],[100,'GAMESSNW.IDX']])if(files[f])parseIdx(new Uint8Array(await files[f].arrayBuffer())).forEach((x,i)=>{names[o+i]=x;});return names;}
+const slotText=(k,names,both)=>'Slot '+slotNum(k)+': '+((names[k-1]||{}).name||('Game #'+slotNum(k)))+(isNW(k)&&both?' · Brave New World':'');
 const canPick=()=>typeof window.showDirectoryPicker==='function';
-async function readDirHandle(dir){const files={};for await(const [name,hd] of dir.entries()){if(hd.kind!=='file')continue;const u=name.toUpperCase();if(/\.(S16|IDX|DB1)$/.test(u))files[u]=await hd.getFile();}return files;}
+async function readDirHandle(dir){const files={};for await(const [name,hd] of dir.entries()){if(hd.kind!=='file')continue;const u=name.toUpperCase();if(/\.(S16|SNW|IDX|DB1)$/.test(u))files[u]=await hd.getFile();}return files;}
 async function ensureRead(dir){let p=await dir.queryPermission({mode:'read'});if(p!=='granted')p=await dir.requestPermission({mode:'read'});return p==='granted';}
 async function prepFiles(files){
-  const slots=[];for(let n=1;n<=7;n++)if(files['PLDATA'+n+'.S16']&&files['TMDATA'+n+'.S16'])slots.push(n);
-  let names=[];if(files['GAMESS16.IDX']){names=parseIdx(new Uint8Array(await files['GAMESS16.IDX'].arrayBuffer()));}
-  slots.sort((a,b)=>files['PLDATA'+b+'.S16'].lastModified-files['PLDATA'+a+'.S16'].lastModified);
+  const slots=findSlots(files),names=await slotNames(files);
   return {slots,names};
 }
 async function pickFolder(fallback){
@@ -2171,7 +2211,7 @@ async function loadLast(rec,btn){
   try{
     if(!(await ensureRead(rec.handle)))throw new Error('permission to read the folder was not given');
     const files=await readDirHandle(rec.handle);const {slots,names}=await prepFiles(files);
-    if(!slots.includes(rec.slot))throw new Error('slot '+rec.slot+' is no longer in that folder');
+    if(!slots.includes(rec.slot))throw new Error('slot '+slotNum(rec.slot)+' is no longer in that folder');
     S.dir={handle:rec.handle};S.load={files,slots,names};await loadSlot(rec.slot);
   }catch(e){if(info)info.replaceChildren(h('span',{style:'color:var(--bad)'},'Could not open the last save ('+e.message+'). Choose your game folder instead.'));}
 }
@@ -2181,7 +2221,7 @@ async function reloadSave(btn){
   try{
     if(!(await ensureRead(S.dir.handle)))throw new Error('permission to read the folder was not given');
     const files=await readDirHandle(S.dir.handle);const {slots,names}=await prepFiles(files);
-    const n=S.slotN;if(!slots.includes(n))throw new Error('slot '+n+' is no longer in that folder');
+    const n=S.slotN;if(!slots.includes(n))throw new Error('slot '+slotNum(n)+' is no longer in that folder');
     const keep=[...S.squad.excl].map(i=>S.world.players[i]).filter(Boolean).map(plKey);
     S.load={files,slots,names};await loadSlot(n,{reload:true,keep});
   }catch(e){alert('Could not reload the save: '+e.message);btn.disabled=false;btn.textContent=label;}
@@ -2189,15 +2229,13 @@ async function reloadSave(btn){
 async function gotFiles(list,dirHandle){
   const files={};if(list instanceof FileList||Array.isArray(list)){for(const f of list){files[f.name.toUpperCase()]=f;}}else Object.assign(files,list);
   S.dir=dirHandle?{handle:dirHandle}:null;
-  const slots=[];
-  for(let n=1;n<=7;n++)if(files['PLDATA'+n+'.S16']&&files['TMDATA'+n+'.S16'])slots.push(n);
+  const slots=findSlots(files);
   const info=$('#loadinfo');
-  if(!slots.length){info.replaceChildren(h('span',{style:'color:var(--bad)'},'No save found. I could not see matching PLDATA#.S16 and TMDATA#.S16 files in what you chose. Pick the Data folder that contains your saves.'));return;}
-  let names=[];if(files['GAMESS16.IDX']){names=parseIdx(new Uint8Array(await files['GAMESS16.IDX'].arrayBuffer()));}
-  slots.sort((a,b)=>files['PLDATA'+b+'.S16'].lastModified-files['PLDATA'+a+'.S16'].lastModified);
+  if(!slots.length){info.replaceChildren(h('span',{style:'color:var(--bad)'},'No save found. I could not see matching PLDATA#.S16 and TMDATA#.S16 files (or PLDATA#.SNW and TMDATA#.SNW for Brave New World) in what you chose. Pick the Data folder that contains your saves.'));return;}
+  const names=await slotNames(files);const both=slots.some(isNW)&&!slots.every(isNW);
   S.load={files,slots,names};
-  const sel=h('select',{id:'slotSel'},slots.map(n=>{const nm=(names[n-1]||{}).name||('Game #'+n);const d=new Date(files['PLDATA'+n+'.S16'].lastModified);return h('option',{value:n},'Slot '+n+': '+nm+'  (saved '+d.toLocaleString('en-GB')+')');}));
-  const miss=[];if(!files['PLAYERS.DB1'])miss.push('PLAYERS.DB1 (needed for nationality names)');if(!files['TMDATA.DB1'])miss.push('TMDATA.DB1 (needed for leagues)');
+  const sel=h('select',{id:'slotSel'},slots.map(n=>{const d=new Date(files[slotFile('PLDATA',n)].lastModified);return h('option',{value:n},slotText(n,names,both)+'  (saved '+d.toLocaleString('en-GB')+')');}));
+  const miss=[];if(!files['PLAYERS.DB1'])miss.push('PLAYERS.DB1 (needed for nationality names)');const tdb=k=>isNW(k)?(files['TM_BNW.DB1']?null:'TM_BNW.DB1'):(files['TMDATA.DB1']?null:'TMDATA.DB1');const tmiss=[...new Set(slots.map(tdb).filter(Boolean))];if(tmiss.length)miss.push(tmiss.join(' / ')+' (needed for leagues)');
   info.replaceChildren(h('div',{style:'margin:8px 0'},h('label',{class:'f',style:'display:inline-flex'},'Save to load',sel)),' ',h('button',{class:'b p',onclick:()=>loadSlot(Number(sel.value))},'Load this save'),
     ...(miss.length?[h('div',{class:'warnbox'},'Not found in the folder you chose: '+miss.join('; ')+'. The tool still works without them.')]:[]));
 }
@@ -2206,24 +2244,27 @@ async function loadSlot(n,opt){
   const info=$('#loadinfo')||{replaceChildren(){}};info.replaceChildren('Reading files…');
   const f=S.load.files;const rd=async x=>x?new Uint8Array(await x.arrayBuffer()):null;
   try{
-    const pl=await rd(f['PLDATA'+n+'.S16']),tm=await rd(f['TMDATA'+n+'.S16']),gn=await rd(f['GNDATA'+n+'.S16']),mg=await rd(f['MGDATA'+n+'.S16']),cp=await rd(f['CPDATA'+n+'.S16']);
-    const db1p=await rd(f['PLAYERS.DB1']),db1t=await rd(f['TMDATA.DB1']);
+    const pl=await rd(f[slotFile('PLDATA',n)]),tm=await rd(f[slotFile('TMDATA',n)]),gn=await rd(f[slotFile('GNDATA',n)]),mg=await rd(f[slotFile('MGDATA',n)]),cp=await rd(f[slotFile('CPDATA',n)]);
+    const db1p=await rd(f['PLAYERS.DB1']),db1t=await rd(isNW(n)?f['TM_BNW.DB1']:f['TMDATA.DB1']);
     let date=[20,12,1997];if(gn&&gn.length>0x1ad){const d=gn[3],m=gn[4],y=1900+gn[5];if(d>=1&&d<=31&&m>=1&&m<=12&&y>=1990&&y<=2100)date=[d,m,y];}
-    const W=buildWorld({pl,tm,gn,mg,cp,db1players:db1p,db1teams:db1t},n,date);
+    const W=buildWorld({pl,tm,gn,mg,cp,db1players:db1p,db1teams:db1t,edition:isNW(n)?'bnw':'',teamDb:isNW(n)?'TM_BNW.DB1':'TMDATA.DB1'},n,date);W.edition=isNW(n)?'bnw':'';
     W.byClub={};for(const p of W.players){(W.byClub[p.clubId]=W.byClub[p.clubId]||[]).push(p);p._n=p.name.toLowerCase();}
     for(const p of W.players)p._c=p.club.toLowerCase();
-    W.slotLabel='Slot '+n+': '+((S.load.names[n-1]||{}).name||'');
+    W.slotLabel='Slot '+slotNum(n)+': '+((S.load.names[n-1]||{}).name||'')+(isNW(n)?' · Brave New World':'');
     W.gameDate=date;S.world=W;S.slotN=n;S.page=0;S.cmp=new Set();
     if(opt.reload){const k=new Set(opt.keep||[]);S.squad.excl=new Set(W.players.filter(p=>k.has(plKey(p))).map(p=>p.idx));}else{S.squad.club=null;S.squad.excl=new Set();restoreClub();}
     if(S.dir&&S.dir.handle)idb.set('last',{handle:S.dir.handle,slot:n,label:W.slotLabel}).catch(()=>{});
     const clubs=document.getElementById('clubs');
     render();
-  }catch(e){info.replaceChildren(h('span',{style:'color:var(--bad)'},'Could not read the save: '+e.message));console.error(e);}
+  }catch(e){
+    const sz=k=>{const x=f[slotFile(k,n)];return k+slotNum(n)+': '+(x?x.size.toLocaleString('en-GB')+' bytes':'missing');};
+    const msg=(e instanceof RangeError||/bounds of the DataView/i.test(e.message))?'A save file is shorter than, or laid out differently from, what the tool expects.':e.message;
+    info.replaceChildren(h('div',{style:'color:var(--bad)'},'Could not read the save. '+msg),h('div',{class:'small mute',style:'margin-top:6px'},'File sizes: '+['PLDATA','TMDATA','GNDATA','MGDATA','CPDATA'].map(sz).join(' · ')+(f['PLAYERS.DB1']?' · PLAYERS.DB1: '+f['PLAYERS.DB1'].size.toLocaleString('en-GB')+' bytes':'')+'. If this keeps happening, please send these sizes, which edition of the game you play, and whether the folder is synced by OneDrive or Dropbox.'));console.error(e);}
 }
 
 /* ---------- shell ---------- */
 function render(){
-  const W=S.world;const hd=$('#hdr');hd.replaceChildren(h('div',{class:'hdt'},h('h1',null,'CM97/98 Scout ',h('span',null,'& Assistant')),h('div',{class:'compat'},'Built for the fan-made CM9798 v2 · not tested on other versions')));
+  const W=S.world;const hd=$('#hdr');hd.replaceChildren(h('div',{class:'hdt'},h('h1',null,'CM97/98 Scout ',h('span',null,'& Assistant')),h('div',{class:'compat'},'For CM9798 v2, Brave New World and the original game'+(W&&W.edition==='bnw'?' (league rules not fully checked)':W&&W.old?' (2.81 save: Unavailable rule off)':''))));
   const root=$('#view');root.replaceChildren();
   if(!W){hd.append(h('span',{class:'status'},'No save loaded'),h('div',{class:'hd-right'},coffeeBtn('coffee hc')));$('#tabs').replaceChildren();showLoader();return;}
   const dateIn=h('input',{type:'text',value:fmtDate(W.gameDate[0],W.gameDate[1],W.gameDate[2]),style:'width:78px',title:'Game date used for ages (dd.mm.yy)',onchange:e=>{const m=/^(\d+)\.(\d+)\.(\d+)$/.exec(e.target.value.trim());if(!m)return;const y=+m[3]<100?1900+ +m[3]:+m[3];W.gameDate=[+m[1],+m[2],y];computeAges(W,W.gameDate);render();}});
