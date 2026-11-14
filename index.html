@@ -513,6 +513,14 @@ function parseComps(cpf){
     const rec=cpf.subarray(q,q+0x7d4);out.push({code:ss[1],name:ss[0],type:rec[0x1c],subs:rec[0x40],fmax:rec[0x42]});q+=0x7d4;}
   return out;
 }
+/* Competition codes in file order (EPR, ED1, ...). A club's division byte in the save is an index into this list,
+   and the code is the same one the team database uses for a division. Record size: 0x7d4, or 0x7c4 in 2.81. */
+function compCodes(cpf,old){
+  const out=[];if(!cpf)return out;let q=2;const rec=old?0x7c4:0x7d4;
+  while(cpf.length-q>0x20000+10){const ss=[];for(let k=0;k<5;k++){if(q+2>cpf.length)return out;const L=cpf[q]|(cpf[q+1]<<8);if(L>60)return out;ss.push(latin(cpf,q+2,q+2+L));q+=2+L;}
+    out.push(ss[1]);q+=rec;}
+  return out;
+}
 /* The game's own "foreign" test. A player is foreign for a club when the club's country is on the game's exempt list
    and the player's country is not. Read from the game code; English and Scottish clubs also treat Jamaica as exempt,
    Portuguese clubs treat Brazil, Angola and Mozambique as exempt. National teams and special teams never have foreigners. */
@@ -565,7 +573,12 @@ function buildWorld(files,slot,gameDate){
     const votes={};
     for(const tm of teams){const r=byLong[nk(tm.name)]||byShort[nk(tm.name)];if(r&&r.Division&&tm.div!==255&&tm.div!==undefined){const v=votes[tm.div]=votes[tm.div]||{};v[r.Division]=(v[r.Division]||0)+1;}}
     const divMap={};
-    for(const b in votes){const e=Object.entries(votes[b]).sort((x,y)=>y[1]-x[1]);const tot=e.reduce((s,x)=>s+x[1],0);if(tot>=6&&e[0][1]/tot>=0.6)divMap[b]=e[0][0];}
+    // Preferred: the division byte indexes the competition list, so read the division straight from it. This holds however long the save has run.
+    // The vote is only the fallback for when the competition file is missing.
+    const codes=compCodes(files.cp,world.old),known=new Set(t.map(r=>r.Division).filter(Boolean));
+    const direct=codes.length>0;
+    if(direct){for(const tm of teams)if(tm.div!==255&&tm.div!==undefined&&known.has(codes[tm.div]))divMap[tm.div]=codes[tm.div];}
+    else for(const b in votes){const e=Object.entries(votes[b]).sort((x,y)=>y[1]-x[1]);const tot=e.reduce((s,x)=>s+x[1],0);if(tot>=6&&e[0][1]/tot>=0.6)divMap[b]=e[0][0];}
     let miss=0;const allNames=new Set();for(const r of t){allNames.add(nk(r['UK Long Name']));allNames.add(nk(r['UK Short Name']));}
     for(const tm of teams){const r=byLong[nk(tm.name)]||byShort[nk(tm.name)];const live=divMap[tm.div];tm.league=live?label(live):(r&&r.Division?label(r.Division):'');tm.nationName=r?r.Nation:'';if(!r&&!divMap[tm.div]&&!allNames.has(nk(tm.name))&&players.some(p=>p.clubId===tm.id))miss++;}
     if(miss)world.warnings.push(miss+' clubs with players could not be matched to a league (name not found in '+(files.teamDb||'TMDATA.DB1')+').');
@@ -583,7 +596,10 @@ function buildWorld(files,slot,gameDate){
     for(const id in votes){let best='',bc=0;for(const k in votes[id])if(votes[id][k]>bc){bc=votes[id][k];best=k;}natName[id]=best;}
     // fall back on team nations (same id space) for ids with no matched player
     for(const tm of teams)if(tm.nationName&&natName[tm.natId]===undefined)natName[tm.natId]=tm.nationName;
-  }else world.warnings.push('PLAYERS.DB1 not found: nationality names are unavailable.');
+  }else world.warnings.push('PLAYERS.DB1 not found: nationality names come from the save only.');
+  // A nationality id is the id of that country's national team in the save. Use its name when no starting-database player
+  // is left to learn the name from (long saves), or when the database is missing.
+  for(const pl of players){const id=pl.natId;if(natName[id]===undefined){const tm=teams[id];if(tm&&tm.name&&tm.div===255)natName[id]=tm.name;}}
   world.natName=natName;
   world.comps=world.old?[]:parseComps(files.cp);makeForeign(world);
   world.setDate=gameDate;
@@ -2136,8 +2152,8 @@ function renderAbout(root){
         h('p',{class:'small'},'The game sets this up by default. The number in a file name is the save slot: slot 1 files end in 1, slot 2 files end in 2, and so on, so you will only see sets for the slots you have used. The example below shows slot 1, plus one slot 2 set. PLAYERS.DB1, TMDATA.DB1 and GAMESS16.IDX are shared by all saves. Brave New World uses the same set with different names: its save files end in .SNW, its slot list is GAMESSNW.IDX and its team database is TM_BNW.DB1. The tool spots which version a save is from the file names.'),
         h('pre',{class:'dirlist'},'PLDATA1.S16   TMDATA1.S16   GNDATA1.S16   MGDATA1.S16   CPDATA1.S16     (save slot 1)\nPLDATA2.S16   TMDATA2.S16   GNDATA2.S16   MGDATA2.S16   CPDATA2.S16     (save slot 2)\nGAMESS16.IDX\nPLAYERS.DB1\nTMDATA.DB1'))),
     sec('About',
-      h('p',null,B('Version 1.2'),' (November 2026). A fan-made tool. Not affiliated with or endorsed by the game\'s publisher or developer.'),
-      h('details',{class:'fold'},h('summary',null,'Version history'),h('ul',null,li(B('v1.2'),' (November 2026): opens Brave New World saves as well as v2. Opens saves from the original game, including the unpatched 2.81 version, which stores its data differently. Clearer messages when a save file cannot be read.'),li(B('v1.1'),' (November 2026): new Regens tab and "Is regen" filter in Scout, showing who each regen replaced. Goalkeeper added to the league reference and Best 11 comparison. Tick boxes in Find players aligned.'),li(B('v1.0'),' (November 2026): first public release. Scout with role finder and engine-based Rating, Assistant Manager with best 11, squad depth and league reference, shortlist and settings.'))),
+      h('p',null,B('Version 1.2.1'),' (November 2026). A fan-made tool. Not affiliated with or endorsed by the game\'s publisher or developer.'),
+      h('details',{class:'fold'},h('summary',null,'Version history'),h('ul',null,li(B('v1.2.1'),' (November 2026): fixes for long-running saves. Clubs now show their current division however many seasons have passed, and nationalities are named even when no original players are left.'),li(B('v1.2'),' (November 2026): opens Brave New World saves as well as v2. Opens saves from the original game, including the unpatched 2.81 version, which stores its data differently. Clearer messages when a save file cannot be read.'),li(B('v1.1'),' (November 2026): new Regens tab and "Is regen" filter in Scout, showing who each regen replaced. Goalkeeper added to the league reference and Best 11 comparison. Tick boxes in Find players aligned.'),li(B('v1.0'),' (November 2026): first public release. Scout with role finder and engine-based Rating, Assistant Manager with best 11, squad depth and league reference, shortlist and settings.'))),
       h('p',null,'Created by ',X('RobertoLarcos_6','@RobertoLarcos_6'),'. Contact and updates on X. If the tool helps you, you can ',coffeeBtn('coffeelink','buy me a coffee'),'.'),
       h('p',null,...DISCLAIMER()),
       h('p',null,'The engine scoring is a port of the game\'s own routines, checked against the original program. The way the match engine uses attributes was also informed by John North\'s "Exploring the Match Engine" article. Everything runs in your browser.')),
