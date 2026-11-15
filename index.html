@@ -23,7 +23,7 @@ input[type=text]{width:160px}
 button.b{font:inherit;padding:5px 11px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:5px;cursor:pointer}
 button.b:hover{border-color:var(--acc)}
 button.p{background:var(--acc);color:#fff;border-color:var(--acc)}
-.mute{color:var(--mute)}.small{font-size:12px}
+.mute{color:var(--mute)}.potdim{opacity:.45}.small{font-size:12px}
 table.t{border-collapse:collapse;width:100%;font-size:13px}
 table.t th{position:sticky;top:0;background:var(--panel);text-align:left;padding:5px 8px;border-bottom:2px solid var(--line);cursor:pointer;white-space:nowrap;user-select:none;font-size:12px}
 table.t td{padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -283,7 +283,7 @@ table.fz3 tr:hover td:nth-child(-n+3),table.fz2 tr:hover td:nth-child(-n+2){back
 .doc details.fold{margin-top:10px;max-width:860px}.doc details.fold summary{cursor:pointer;font-weight:600;font-size:14px}
 .hdt{display:flex;flex-direction:column;gap:4px}.compat{font-size:12px;color:#cfe3d4;letter-spacing:.01em}.compat2{margin:0 0 10px;font-size:14px;padding:6px 12px;display:inline-block;background:var(--accbg);border-radius:8px}
 
-.pw-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0 10px}
+.pw-tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:14px 0 10px}
 .pw-tile{background:var(--head);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .pw-l{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);font-weight:600}
 .pw-big{font-size:30px;line-height:1.1;font-weight:700;margin-top:2px;font-family:var(--hf)}
@@ -741,7 +741,7 @@ function makeAvailEngine(files,players,teams,warn){
     if(x<1e9)return Math.trunc(x*2e-8)*5e7;if(x<5e9)return Math.trunc(x*5e-9)*2e8;return Math.trunc(x*2e-9)*5e8;};
   const ageAtEnd=i=>{const cd=pb(i,0x4f),cm=pb(i,0x50),cy=pb(i,0x51),bd=pb(i,0x14),bm=pb(i,0x15),by=pb(i,0x16);let al=(cy-by)&0xff;const ah=(al-1)&0xff;
     if(s8(cm)<s8(bm))al=ah;else if(cm===bm&&!(s8(cd)>=s8(bd)))al=ah;return s8(al);};
-  let NOW={month:G.month,year:G.year};
+  let NOW={day:G.day,month:G.month,year:G.year};
   const plval=(i,B)=>{const club=psw(i,0xf);if(B>-1){if(tw(B,0x51)===pw(i,0xf)||tw(club,0x51)===B)return 0;}
     if(pb(i,0x8a)===4)return 0;const st=pd(i,0x7a);let v=Math.max(st*0.001,5.0);const age=ageAtEnd(i);let f=100;
     if(G.f6a&&age>=0x18){const par=club>=0?tsw(club,0x1c):-1;let okp=false;if(par>=0){okp=(par===SP.eng||par===SP.sco||par===SP.wal||par===SP.ni||par===SP.ire)?true:tb(par,0x24)!==0;}
@@ -764,9 +764,52 @@ function makeAvailEngine(files,players,teams,warn){
     if(h77c34(C)&&!h778fc(C)){if(s8(tb(C,0x120))<=COMPS[compOf(C)].rec[0x44]&&free&&st!==1&&st!==2&&st!==3&&W>thr)return [7,0];}
     if(free&&st!==1&&st!==2){if(s8(pb(P,0x13))<0x55){if(psw(P,0x1c)-rating(C,1)<20)return [0,0];}if(W>thr)return [3,2];}
     return [0,0];};
+  /* ---- "Would he join?" : the game's own interest test, the one behind its "Interested Foreign Based" search option
+     (and "Interested Domestic Based" in John North's patch). Same code in 2.93, v2 and Brave New World.
+     Returns 0 = interested, 1 = free agent a club in that country cannot sign, 2 = buying club not big enough for him, 3 = prefers his current club. */
+  const dvg=new DataView(gn.buffer,gn.byteOffset,gn.byteLength);
+  const RATE=(()=>{const r=dvg.getFloat64(442,true);return r>0&&isFinite(r)?r:1;})();   // currency rate the game scales club money by (1 for pounds)
+  const s16=x=>((x&0xffff)^0x8000)-0x8000,tr=Math.trunc;
+  const WTAB=[100,500,1000,10000,30000,50000,65000,80000,125000,250000,500000,750000,1250000,2500000,5000000,10000000,12000000,15000000,20000000,25000000,30000000];
+  const isNat=T=>{const n=tsw(T,0x1c);return (n>=0x44c&&n<=0x452)||tw(T,0x4f)!==0;};
+  const ukire=x=>x===SP.eng||x===SP.sco||x===SP.wal||x===SP.ni||x===SP.ire;
+  const isSpecial=C=>C===SP.freetr||C===SP.school||C===SP.retired||C===SP.nonleague||C===SP.minor;
+  const realClub=C=>!(tsw(C,0x1c)===0x452||isSpecial(C));
+  const baseNat=P=>{const C=pw(P,0xf);return isSpecial(C)?pw(P,8):tw(C,0x1c);};
+  const region=T=>tw(T,0x1e);
+  // club standing: 5*(two reputation bytes) + half the form byte, optionally plus up to 30 for money in the bank
+  const stand=(T,money,narrow)=>{let cx=5*(s8(tb(T,0x3c))+s8(tb(T,0x3e)))+(tb(T,0x122)>>1);
+    if(money){const w=isNat(T)?0:wealth(T);const idx=tr(stand(T,0,0)/10);let v=tr(w/((WTAB[idx]||WTAB[20])*RATE));if(!(v>-2147483648&&v<2147483648))v=-2147483648;cx+=Math.max(0,Math.min(30,v));}
+    cx=s16(cx);return narrow?Math.max(30,Math.min(170,cx)):Math.max(1,Math.min(200,cx));};
+  const dist=(A,B)=>{const xa=tb(A,0x22),xb=tb(B,0x22);if(!ok(A)||!ok(B)||xa===0||xb===0)return -1;const dx=s8(xa-xb),dy=s8(tb(A,0x23)-tb(B,0x23));return s16(tr(Math.sqrt(dx*dx+dy*dy)*975*0.01));};
+  // how much the player likes a club: a personal number (byte 358) against the club's, and against clubs outside his own region
+  const liking=(T,P)=>{let cl=0;if(region(pw(P,8))!==region(tw(T,0x1c)))cl=-((pb(P,358)*P)%20);
+    if(!isNat(T)&&h77c34(T)){const a=pb(P,358)%20,b=tb(T,0x5b9)%20;if(a===b)cl+=20;else if(a===20-b)cl-=20;}return s8(cl);};
+  const moveFar=(B,P,C)=>{const d=dist(C,B);if(d<=-1)return 0;return s8(tr(-(pb(P,358)%100)*d/1000));};
+  const ageNow=P=>{let al=(NOW.year-pb(P,0x16))&0xff;const bm=s8(pb(P,0x15));if(NOW.month<bm||(NOW.month===bm&&NOW.day<s8(pb(P,0x14))))al=(al-1)&0xff;return s8(al);};
+  const interest=(P,B)=>{
+    const C=psw(P,0xf),cl=pb(P,0x8a)===3?1:0;
+    if(!ok(B))return 0;
+    if((C&0xffff)===tw(B,0x51))return 0;if(ok(C)&&tw(C,0x51)===(B&0xffff))return 0;
+    const t0=s8(pb(P,237))-10;
+    let cur=tr(t0/2)+liking(C,P)-7*s8(h778fc(C));
+    if(psw(P,30)<150&&(h77c34(C)||ukire(tsw(C,0x1c)))&&!h77c34(B)&&!ukire(tsw(B,0x1c)))cur+=98-3*ageNow(P);
+    cur=s16(cur);
+    let cx=liking(B,P)+moveFar(B,P,C)+30-tr(psw(P,34)/5)-7*s8(h778fc(B));
+    const m=tsw(B,0x25);
+    if(m>-1&&m<MG.length){cx+=Math.max(0,(MG[m][12]>>1)-75);
+      const k=s8(MG[m][16]);const d=Math.max(0,Math.min(10,tr((psw(P,30)-stand(B,1,0))/10)+5));cx=s16(cx)-tr(k*d/10);}
+    if(tw(B,0x1c)!==pw(P,8)){const x=realClub(C)?tsw(C,0x1c):pw(P,8);cx+=50*(tsw(x,0x20)-tsw(tsw(B,0x1c),0x20));}
+    const bx=(pb(P,358)%75)+stand(B,1,1)-25-20*s8(h778fc(B));
+    const rb=region(tw(B,0x1c));
+    if(region(pw(P,8))!==rb&&region(baseNat(P))!==rb)cx=s16(cx)-(180-Math.min(s16(bx),180))*(cl?2:1);
+    const st=s8(pb(P,0x8a));
+    if(st===4&&pw(P,8)!==tw(B,0x1c)&&s8(tb(tsw(B,0x1c),0x3f))<8)return 1;
+    if(st>=1&&st<=4)return (psw(P,34)-stand(B,1,1)-s16(cx))>50?2:0;
+    return (stand(B,1,0)+s16(cx))>=(stand(C,1,0)+cur)?0:3;};
   const LABEL={'2:0':15,'3:1':10,'3:2':11,'4:0':16,'5:0':12,'6:0':13,'7:0':14};
   return {buyer:BUY,date:[G.day,G.month,1900+G.year],
-    run(date){NOW={month:date[1],year:date[2]-1900};
+    run(date){NOW={day:date[0],month:date[1],year:date[2]-1900};
       for(let i=0;i<players.length;i++){const p=players[i];const C=p.clubId;
         const [r,w]=F(i,C,BUY);
         const code=r?LABEL[r+':'+w]:0;
@@ -774,7 +817,7 @@ function makeAvailEngine(files,players,teams,warn){
         p.avail=code?code:(save>=1&&save<=4?save:0);
         p.value=Math.round(plval(i,BUY)*2);}
       AVAIL[0]='Available';},
-    F,plval:(i)=>plval(i,BUY),_dbg:{h77b34,h6599c,h77760,h784b4,h77f4c,h778fc,h77c34,h7f44c,wealth,rating}};
+    F,plval:(i)=>plval(i,BUY),interest,isNat,_dbg:{stand,liking,moveFar,dist,ageNow,h77b34,h6599c,h77760,h784b4,h77f4c,h778fc,h77c34,h7f44c,wealth,rating}};
 }
 
 const SHORT_DAYS=183,SHORT_FACTOR=0.655;
@@ -1003,17 +1046,30 @@ const ENG_CORE=[[6,3],[5,1],[5,2],[5,4],[5,5],[4,3],[3,3],[2,2],[2,4],[2,3]];
 let ENG_CTX=null,ENG_CACHE=new Map();
 let ENG_MEMO=new Map();
 function getEngine(){return ENG_CTX;}
-function setEngine(ctx){ENG_CTX=ctx;ENG_MEMO=new Map();}
+function setEngine(ctx){ENG_CTX=ctx;ENG_MEMO=new Map();POT_MEMO=new Map();}
 // Rating: the engine score (position penalty included) on the square where the player does best
-function ratingBest(pl){
-  if(!ENG_CTX)return {v:null,row:0,col:0};
-  let r=ENG_MEMO.get(pl.idx);if(r)return r;
-  if(pl.pos[0]>=2){r={v:engineScore(pl,ENG_CTX,7,3,true),row:7,col:3};ENG_MEMO.set(pl.idx,r);return r;}
-  r={v:-1,row:0,col:0};const all=[];
+function bestSquare(pl){
+  if(pl.pos[0]>=2)return {v:engineScore(pl,ENG_CTX,7,3,true),row:7,col:3};
+  let r={v:-1,row:0,col:0};const all=[];
   for(const k in ENG_CTX.v){const [a,b]=k.split(',').map(Number);const v=engineScore(pl,ENG_CTX,a,b,true);all.push({v,row:a,col:b});if(v>r.v)r={v,row:a,col:b};}
   r.near=all.filter(x=>x.v>=r.v-1).sort((x,y)=>y.v-x.v);
-  ENG_MEMO.set(pl.idx,r);return r;
+  return r;
 }
+function ratingBest(pl){
+  if(!ENG_CTX)return {v:null,row:0,col:0};
+  let r=ENG_MEMO.get(pl.idx);if(!r){r=bestSquare(pl);ENG_MEMO.set(pl.idx,r);}return r;
+}
+/* Potential Rating: the same engine Rating with PA in place of CA. The game never changes a player's playing attributes
+   (they are only written when he is created), so CA is the only thing that can move. It is a ceiling, not a forecast.
+   From POT_AGE on, CA no longer rises on average (measured in saves), so the figure is shown dimmed. */
+const POT_AGE=26;
+let POT_MEMO=new Map();const POT_Q=new WeakMap();
+function potPlayer(p){let q=POT_Q.get(p);if(!q){q=Object.create(p);q.ca=Math.max(p.ca,p.pa);POT_Q.set(p,q);}return q;}
+function potentialBest(pl){
+  if(!ENG_CTX)return {v:null,row:0,col:0};
+  let r=POT_MEMO.get(pl.idx);if(!r){r=bestSquare(potPlayer(pl));POT_MEMO.set(pl.idx,r);}return r;
+}
+const potPast=p=>p.age>=POT_AGE;
 
 /* ---- captain and set pieces (from John North's captaincy and set-piece findings; see notes in the tool) ---- */
 const CAP_AGE={16:[1,9],17:[1,12],18:[3,15],19:[6,18],20:[9,20],21:[12,20],22:[15,20],23:[18,20]};
@@ -1118,6 +1174,16 @@ function arrowMap(){
     if(!S.squad.squares.some(([a,b])=>a===r2&&b===c2)&&!ex.some(([a,b])=>a===r2&&b===c2))ex.push([r2,c2]);}
   return {m,ex};
 }
+/* Interested: the game's own "would he join" test for a buying club (see makeAvailEngine.interest).
+   The buyer is "Your club" if one is set, otherwise the human manager's club in the save. -1 = not applicable. */
+const INTR_TXT={0:'Yes',1:'No: a club in that country cannot sign him as a free agent',2:'No: the club is not big enough for him',3:'No: prefers his current club'};
+function intrBuyer(){const W=S.world;if(!W||!W.engine)return null;return S.squad.club!=null?S.squad.club:W.engine.buyer;}
+let INTR={};
+function interestOf(p){const W=S.world,B=intrBuyer();if(B==null)return -1;
+  const dk=String(W.gameDate||'');
+  if(INTR.w!==W||INTR.b!==B||INTR.d!==dk)INTR={b:B,w:W,d:dk,nat:W.engine.isNat(B),m:new Int8Array(W.players.length).fill(-2)};
+  let v=INTR.m[p.idx];if(v===-2){v=p.clubId===B?-1:(INTR.nat?0:W.engine.interest(p.idx,B));INTR.m[p.idx]=v;}return v;}
+const intrLabel=p=>{const v=interestOf(p);return v<0?'–':INTR_TXT[v];};
 function setClub(t){
   S.squad.club=t.id;S.squad.excl=new Set();store.set('club',t.name);
   const rec=[t.name].concat(store.get('clubs',[]).filter(n=>n!==t.name)).slice(0,3);store.set('clubs',rec);
@@ -1200,18 +1266,18 @@ const plKey=pl=>pl.first+'|'+pl.last+'|'+pl.dobD+'.'+pl.dobM+'.'+pl.dobY;
 /* ---------- state ---------- */
 const S={world:null,cfg:Object.assign({},DEFAULT_CFG,store.get('cfg',{})),tab:'scout',
   short:new Set(store.get('short',[])),saved:store.get('saved',{}),
-  colIds:store.get('cols',null),hideRole:new Set(store.get('hideRole',[])),sort:{id:'rating',dir:-1},page:0,cmp:new Set(),
+  colIds:(()=>{const c=store.get('cols',null);/* show the new Potential Rating column once for people with a saved column choice */if(c&&!store.get('potAdded',false)){store.set('potAdded',true);if(!c.includes('potrating')){const at=c.indexOf('rating');c.splice(at<0?c.length:at+1,0,'potrating');store.set('cols',c);}}return c;})(),hideRole:new Set(store.get('hideRole',[])),sort:{id:'rating',dir:-1},page:0,cmp:new Set(),
   filters:null,role:{row:0,col:0},
   squad:{club:null,squares:[],arrows:{},preset:'',excl:new Set()},sf:{sort:{id:'pos',dir:1},name:'',grp:'',caMin:'',ageMax:'',role:'',fitMin:'',hideOut:false},forms:store.get('forms',[]),
   load:{files:null,slots:[]}};
 S.cfg.roles=JSON.parse(JSON.stringify(Object.assign({},DEFAULT_CFG.roles,S.cfg.roles||{})));S.cfg.weights=Object.assign({},DEFAULT_CFG.weights,S.cfg.weights);S.cfg.gkMix=Object.assign({},DEFAULT_CFG.gkMix,S.cfg.gkMix);if(S.cfg.ratV!==2){if(S.cfg.ratGood===75&&S.cfg.ratOk===60){S.cfg.ratGood=68;S.cfg.ratOk=54;}S.cfg.ratV=2;}S.cfg.gkWeights=Object.assign({},DEFAULT_CFG.gkWeights,S.cfg.gkWeights);
 function saveCfg(){store.set('cfg',S.cfg);}
-const newFilters=()=>({fitRules:[],ratRules:[],name:'',club:'',regen:false,nation:'',league:'',avail:'',hideNo:false,nonForeign:false,maxPen:'30',ageMin:'',ageMax:'',caMin:'',caMax:'',paMin:'',paMax:'',valMin:'',valMax:'',wageMin:'',wageMax:'',endMax:'',pos:{},rules:[],short:false});
+const newFilters=()=>({fitRules:[],ratRules:[],potMin:'',interested:false,name:'',club:'',regen:false,nation:'',league:'',avail:'',hideNo:false,nonForeign:false,maxPen:'30',ageMin:'',ageMax:'',caMin:'',caMax:'',paMin:'',paMax:'',valMin:'',valMax:'',wageMin:'',wageMax:'',endMax:'',pos:{},rules:[],short:false});
 S.filters=newFilters();
 
 /* ---------- columns ---------- */
 let COLS=[];
-const DEFAULT_IDS=['star','name','club','nation','age','pos','ca','pa','value','wage','end','avail','rating','bestsq','best','rr_GK','rr_DW','rr_DC','rr_DM','rr_MC','rr_AM','rr_SC','arrow'];
+const DEFAULT_IDS=['star','name','club','nation','age','pos','ca','pa','value','wage','end','avail','rating','potrating','bestsq','best','rr_GK','rr_DW','rr_DC','rr_DM','rr_MC','rr_AM','rr_SC','arrow'];
 const defaultIds=()=>DEFAULT_IDS.slice();
 function buildCols(){
   const c=[];const A=(id,label,get,o)=>c.push(Object.assign({id,label,get,num:false,def:false},o||{}));
@@ -1225,6 +1291,7 @@ function buildCols(){
   A('ca','CA',p=>p.ca,{num:true,def:true,tip:'Current Ability'});
   A('pa','PA',p=>p.pa,{num:true,def:true,tip:'Potential Ability (not used in matches)'});
   A('rating','Rating',p=>ratingBest(p).v==null?-1:ratingBest(p).v,{num:true,cls:v=>v<0?'':ratCls(v),fmt:v=>v<0?'–':pct(v),def:true,tip:'How well the engine rates him on the square where he does best (CA and position penalty included), as a % of a perfect player on that square (20 in every attribute the engine reads, CA 200). Uses your picker formation, or the default shape.'});
+  A('potrating','Potential Rating',p=>potentialBest(p).v==null?-1:potentialBest(p).v,{num:true,cls:v=>v<0?'':ratCls(v),fmt:v=>v<0?'–':pct(v),def:true,dim:potPast,tip:'His Rating if his CA reached his PA. His attributes stay as they are, because the game never changes them. It is a ceiling, not a forecast: he may never reach it. Shown faded from age '+POT_AGE+', when CA stops rising on average.'});
   A('bestsq','Best square',p=>bestLabel(ratingBest(p)),{def:true,tip:'The square where his Rating is highest. If other squares score within 1 point, the line(s) are shown instead of one square.'});
   for(const k of ROLE_KEYS)A('rr_'+k,ROLE_LABEL[k]+' rating',p=>ratRole(p,k),{num:true,cls:v=>v<0?'':ratCls(v),fmt:v=>v<0?'N/A':pct(v),def:false,tip:'Rating if he plays '+ROLE_LABEL[k]+' (his attributes, CA and position penalty are all included). '+(k==='DW'?'Best of the left and right defender squares. ':'')+'Outfield players have no GK rating and keepers only have one.'});
   for(const k of ROLE_KEYS)A('fit_'+k,ROLE_LABEL[k]+' fit',p=>((p.pos[0]>=2)!==(k==='GK'))?-1:roleFitR(p,S.cfg,k),{fit:true,num:true,fmt:v=>v<0?'N/A':pct(v),def:k!=='GK',tip:'Role fit using the '+ROLE_LABEL[k]+' attribute profile (Settings)'});
@@ -1242,6 +1309,7 @@ function buildCols(){
   A('rg_oclub','Club then',p=>p.regen&&p.regen.top?(p.regen.top.rec['Current Club']||'').replace(/^\*\s*/,''):'',{tip:'His club at the start of the game'});
   A('rg_oca','CA then',p=>p.regen&&p.regen.top?dbAbil(p.regen.top.rec.Ability):-1,{num:true,fmt:v=>v>0?v:'–',tip:'His Current Ability at the start of the game (blank for some players)'});
   A('rg_opa','PA then',p=>p.regen&&p.regen.top?dbAbil(p.regen.top.rec.Potential):-1,{num:true,fmt:v=>v>0?v:'–',tip:'His Potential Ability at the start of the game (blank for some players)'});
+  A('intr','Interested',p=>{const v=interestOf(p);return v<0?9:v;},{fmt:v=>v===9?'–':v===0?'Yes':v===1?'No (free agent rule)':v===2?'No (club too small)':'No (prefers his club)',def:false,tip:'Would he be interested in joining your club? The game\'s own test, as used by its "Interested" search options. Uses "Your club" (Role finder) if set, otherwise the club you manage in the save.'});
   A('avail','Status',p=>availUn(p.avail)?99:p.avail,{fmt:v=>availLabel(v>=99?10:v),def:true});
   A('wanted','Wanted by',p=>p.wanted,{num:true,tip:'Probably the number of clubs wanting him'});
   A('rep','Reputation',p=>p.rep,{num:true});
@@ -1286,7 +1354,7 @@ const fgnFor=p=>S.world.isForeign(p,S.squad.club);
 const EU_NATIONS=new Set(['England','Scotland','Wales','Northern Ireland','Ireland','France','Germany','Italy','Spain','Portugal','Netherlands','Belgium','Luxembourg','Denmark','Sweden','Finland','Austria','Greece']);
 function filterPlayers(list,f){
   const nm=f.name.trim().toLowerCase(),cl=f.club.trim().toLowerCase();
-  const ageMin=num(f.ageMin),ageMax=num(f.ageMax),caMin=num(f.caMin),caMax=num(f.caMax),paMin=num(f.paMin),paMax=num(f.paMax),
+  const ageMin=num(f.ageMin),ageMax=num(f.ageMax),caMin=num(f.caMin),caMax=num(f.caMax),paMin=num(f.paMin),paMax=num(f.paMax),potMin=num(f.potMin),
     vMin=pm(f.valMin),vMax=pm(f.valMax),wMin=pm(f.wageMin),wMax=pm(f.wageMax),eMax=num(f.endMax);
   const posOn=POS.map((k,i)=>f.pos[k]?i:-1).filter(i=>i>=0&&i<=6),sideOn=POS.map((k,i)=>f.pos[k]?i:-1).filter(i=>i>=7);
   applyEngine();S.inc=null;
@@ -1299,12 +1367,14 @@ function filterPlayers(list,f){
     if(f.league&&p.league!==f.league)return false;
     if(f.avail!==''){if(f.avail==='U'){if(!availUn(p.avail))return false;}else if(p.avail!==Number(f.avail)&&!(f.avail==='10'&&p.avail===12))return false;}
     if(f.hideNo&&(S.world.engine?p.avail>=10:(p.avail===5||p.avail===6)))return false;
+    if(f.interested&&S.world.engine&&interestOf(p)!==0)return false;
     if(S.role.row&&S.role.col&&S.squad.club!=null){const up=upgradeOf(p);if(up==null||up<=0)return false;}
     if(S.role.row===7&&p.pos[0]<1)return false;
     if(S.role.row&&S.role.col&&f.maxPen!==''&&((S.role.row!==7&&p.pos[0]>=2)||penalty(p,S.role.row,S.role.col)>Number(f.maxPen)))return false;
     if(ageMin!=null&&p.age<ageMin)return false;if(ageMax!=null&&p.age>ageMax)return false;
     if(caMin!=null&&p.ca<caMin)return false;if(caMax!=null&&p.ca>caMax)return false;
     if(paMin!=null&&p.pa<paMin)return false;if(paMax!=null&&p.pa>paMax)return false;
+    if(potMin!=null&&!(potentialBest(p).v>=potMin))return false;
     if(vMin!=null&&p.value<vMin)return false;if(vMax!=null&&p.value>vMax)return false;
     if(wMin!=null&&p.wage<wMin)return false;if(wMax!=null&&p.wage>wMax)return false;
     if(eMax!=null&&p.endY>eMax)return false;
@@ -1356,7 +1426,7 @@ function resultsTable(rows,onChange,opts){
       if(c.id==='pos')return h('td',null,posEl(p));
       if(c.id==='rg_of')return h('td',null,p.regen?h('span',{class:'link',style:S.tab==='regens'?'':'color:#d9730d;font-weight:600',onclick:()=>openRegen(p)},c.get(p).replace(/^zz /,'')):'',p.regen&&p.regen.conf==='uncertain'?h('span',{class:'tag warn',style:'margin-left:6px',title:'Two or more players in the database fit equally well. Click to see them.'},'uncertain'):'');
       if(c.id==='rg_conf'){const v=c.get(p);return h('td',{class:'ctr'},v?h('span',{class:'tag '+(v===3?'good':v===2?'warn':'')},c.fmt(v)):'');}
-      const t=cellText(c,p);return h('td',{class:colAlign(c)+(c.fit&&c.get(p)>=0?' '+fitCls(c.get(p)):'')+(c.cls?' '+c.cls(c.get(p)):'')},t);
+      const t=cellText(c,p);return h('td',{class:colAlign(c)+(c.fit&&c.get(p)>=0?' '+fitCls(c.get(p)):'')+(c.cls?' '+c.cls(c.get(p)):'')+(c.dim&&c.dim(p)?' potdim':'')},t);
     })));
   let gHead=null;
   if(opts.groups){
@@ -1422,18 +1492,18 @@ function openPlayer(p){
     h('div',{class:'mute'},p.age+' years · '+p.nation+' · ',h('span',{class:'link',onclick:()=>{m.remove();openSquadFor(p.clubId);}},p.club),p.league?' · '+p.league:''),
     p.regen?h('div',{class:'small',style:'margin-top:4px'},h('span',{class:'tag '+(p.regen.conf==='likely'?'good':p.regen.conf==='uncertain'?'warn':'')},'Regen'),' ',p.regen.top?h('span',null,'of ',h('span',{class:'link',onclick:()=>{m.remove();openRegen(p);}},regName(p.regen.top.rec)),' ('+(p.regen.conf==='likely'?'matched':'uncertain')+')'):h('span',{class:'link',onclick:()=>{m.remove();openRegen(p);}},'replaced player not found')):null,
     h('div',{class:'pw-tiles'},
-      [['Current Ability',p.ca,'pw-big'],['Potential Ability',p.pa,'pw-big'],['Rating',pct(ratingBest(p).v),'pw-big','at '+bestLabel(ratingBest(p)),'t'+ratCls(ratingBest(p).v)],isGK?['Best role fit','N/A','pw-big mute','goalkeeper']:['Best role fit',pct(roleFitR(p,S.cfg,bestRole(p,S.cfg))),'pw-big','as '+ROLE_LABEL[bestRole(p,S.cfg)],'t'+fitCls(roleFitR(p,S.cfg,bestRole(p,S.cfg)))]].map(([l,v,c,sub,acc])=>h('div',{class:'pw-tile'+(acc?' '+acc:'')},h('div',{class:'pw-l'},l),h('div',{class:c},v),sub?h('div',{class:'pw-sub'},sub):null))),
+      [['Current Ability',p.ca,'pw-big'],['Potential Ability',p.pa,'pw-big'],['Rating',pct(ratingBest(p).v),'pw-big','at '+bestLabel(ratingBest(p)),'t'+ratCls(ratingBest(p).v)],['Potential Rating',pct(potentialBest(p).v),'pw-big'+(potPast(p)?' potdim':''),potPast(p)?'unlikely at '+p.age:'if he reaches PA '+Math.max(p.ca,p.pa),'t'+ratCls(potentialBest(p).v)],isGK?['Best role fit','N/A','pw-big mute','goalkeeper']:['Best role fit',pct(roleFitR(p,S.cfg,bestRole(p,S.cfg))),'pw-big','as '+ROLE_LABEL[bestRole(p,S.cfg)],'t'+fitCls(roleFitR(p,S.cfg,bestRole(p,S.cfg)))]].map(([l,v,c,sub,acc])=>h('div',{class:'pw-tile'+(acc?' '+acc:'')},h('div',{class:'pw-l'},l),h('div',{class:c},v),sub?h('div',{class:'pw-sub'},sub):null))),
     h('div',{class:'pw-groups'},
       h('div',{class:'pw-g'},h('h4',null,'Contract and value'),...[['Value ≈',wageStr(p.value)],['Wage per week',wageStr(p.wage)],['Contract ends',fmtDate(p.endD,p.endM,p.endY)],['Joined',fmtDate(p.joinD,p.joinM,p.joinY)]].map(([l,v])=>h('div',{class:'pw-r'},h('span',null,l),h('b',null,v)))),
-      h('div',{class:'pw-g'},h('h4',null,'Availability'),...[['Status',availLabel(p.avail)],['Condition',p.inj>0?'– (injured)':p.cond+'%'],['Wanted by',p.wanted+' clubs'],['Reputation',p.rep],['Talent*',p.talent]].map(([l,v])=>h('div',{class:'pw-r'},h('span',null,l),h('b',null,v)))),
+      h('div',{class:'pw-g'},h('h4',null,'Availability'),...[['Status',availLabel(p.avail)]].concat(S.world.engine&&interestOf(p)>=0?[['Interested in '+S.world.teams[intrBuyer()].name,intrLabel(p)]]:[]).concat([['Condition',p.inj>0?'– (injured)':p.cond+'%'],['Wanted by',p.wanted+' clubs'],['Reputation',p.rep],['Talent*',p.talent]]).map(([l,v])=>h('div',{class:'pw-r'},h('span',null,l),h('b',null,v)))),
       isGK?null:h('div',{class:'pw-g'},h('h4',{title:ARROW_TIP},'Arrow ⓘ'),h('div',{class:'pw-r'},h('span',null,'Off the ball + Positioning'),h('b',null,a.sum)),h('div',{class:'pw-r',title:ARROW_TIP},h('span',null,'Arrow suitability'),h('b',null,a.label+' (≈'+Math.round(a.prob*100)+'% at full condition)')))),
     h('div',{class:'sbs'},
       h('div',null,h('h3',null,'Role fit by position'),
         h('table',{class:'t',style:'width:auto'},ROLE_KEYS.filter(k=>p.pos[0]<2?k!=='GK':k==='GK').map(k=>h('tr',null,h('th',{style:'cursor:default;border-bottom:1px solid var(--line)'},ROLE_LABEL[k]),h('td',{class:'num '+fitCls(roleFitR(p,S.cfg,k)),style:'min-width:56px'},pct(roleFitR(p,S.cfg,k)))))),
         h('div',{class:'small mute',style:'margin-top:6px;max-width:300px'},p.pos[0]>=2?'Goalkeepers are rated on three engine profiles: shot stopping (Tackling), rushing out (Pace, Positioning, Tackling, Technique) and aerial contests (Heading-led), each with his Current Ability. That blend is the Rating shown above. Outfield positions do not apply.':'From each role\'s attribute profile (attributes only). Rating, above, also uses CA and position suitability.')),
       h('div',null,h('h3',null,'Rating by position'),
-        h('table',{class:'t',style:'width:auto'},ROLE_KEYS.filter(k=>p.pos[0]<2?k!=='GK':k==='GK').map(k=>h('tr',null,h('th',{style:'cursor:default;border-bottom:1px solid var(--line)'},ROLE_LABEL[k]),h('td',{class:'num '+ratCls(ratRole(p,k)),style:'min-width:56px'},pct(ratRole(p,k)))))),
-        h('div',{class:'small mute',style:'margin-top:6px;max-width:260px'},'How the engine rates him if he plays that position. It uses his attributes for that role, his CA and his position penalty. DL/DR is the better of the two sides.')),
+        h('table',{class:'t',style:'width:auto'},h('tr',null,h('th',{style:'cursor:default'},''),h('th',{class:'c',style:'cursor:default'},'Now'),h('th',{class:'c',style:'cursor:default',title:'Potential Rating: his Rating at that position if his CA reached his PA'},'Potential')),ROLE_KEYS.filter(k=>p.pos[0]<2?k!=='GK':k==='GK').map(k=>h('tr',null,h('th',{style:'cursor:default;border-bottom:1px solid var(--line)'},ROLE_LABEL[k]),h('td',{class:'num '+ratCls(ratRole(p,k)),style:'min-width:56px'},pct(ratRole(p,k))),h('td',{class:'num '+ratCls(ratRole(potPlayer(p),k))+(potPast(p)?' potdim':''),style:'min-width:56px'},pct(ratRole(potPlayer(p),k)))))),
+        h('div',{class:'small mute',style:'margin-top:6px;max-width:260px'},'How the engine rates him if he plays that position. It uses his attributes for that role, his CA and his position penalty. DL/DR is the better of the two sides. Potential is the same score with his PA in place of his CA: a ceiling, not a forecast.')),
       h('div',null,h('h3',null,'Position ratings'),posPitch(p))),
     h('h3',{style:'margin-top:12px'},'Attributes'),attrBlock,
     h('div',{class:'small mute',style:'margin-top:10px'},'* Talent and the value figure are read from the save and not fully confirmed. Value is the figure the game shows for your club as the buyer, worked out from the game\'s own rule.')
@@ -1441,7 +1511,7 @@ function openPlayer(p){
 }
 function openCompare(){
   const ps=[...S.cmp].map(i=>S.world.players[i]);if(ps.length<2){alert('Tick two or three players first (the ⇄ column).');return;}
-  const rows=[['Club',p=>p.club],['Age',p=>p.age],['Positions',p=>posText(p)],['CA',p=>p.ca],['PA',p=>p.pa],['Rating',p=>pct(ratingBest(p).v)+' at '+bestLabel(ratingBest(p))],].concat(ROLE_KEYS.map(k=>[ROLE_LABEL[k]+' fit',p=>pct(roleFitR(p,S.cfg,k))])).concat([['Value ≈',p=>money(p.value)],['Wage/wk',p=>wageStr(p.wage)],['Contract ends',p=>fmtDate(p.endD,p.endM,p.endY)],['Status',p=>availLabel(p.avail)]])
+  const rows=[['Club',p=>p.club],['Age',p=>p.age],['Positions',p=>posText(p)],['CA',p=>p.ca],['PA',p=>p.pa],['Rating',p=>pct(ratingBest(p).v)+' at '+bestLabel(ratingBest(p))],['Potential Rating',p=>pct(potentialBest(p).v)],].concat(ROLE_KEYS.map(k=>[ROLE_LABEL[k]+' fit',p=>pct(roleFitR(p,S.cfg,k))])).concat([['Value ≈',p=>money(p.value)],['Wage/wk',p=>wageStr(p.wage)],['Contract ends',p=>fmtDate(p.endD,p.endM,p.endY)],['Status',p=>availLabel(p.avail)]])
     .concat(ATTRS.map(a=>[a,p=>p.attr[a]]));
   modal([h('h2',{style:'margin-top:0'},'Compare'),h('table',{class:'t'},h('tr',null,h('th',{style:'cursor:default'},''),ps.map(p=>h('th',{style:'cursor:default'},p.name))),
     rows.map(([l,g])=>{const vals=ps.map(g);const nums=vals.every(v=>typeof v==='number');const best=nums?Math.max(...vals):null;
@@ -1528,12 +1598,14 @@ function renderScout(root){
       h('div',{class:'chk'},
         h('label',{title:'Hides players the game counts as Foreign for your club. The game exempts the EU nations plus Norway, Iceland, Switzerland, Finland, Luxembourg, Cyprus, Malta and the Faroe Islands. English and Scottish clubs also exempt Jamaica; Portuguese clubs also exempt Brazil, Angola and Mozambique. Uses "Your club" (Role finder) if you have set one, otherwise the plain exempt list.'},h('input',{type:'checkbox',checked:f.nonForeign||f.euOnly,onchange:e=>{f.nonForeign=e.target.checked;f.euOnly=false;S.page=0;refreshScout();}}),'Non Foreign'),
         h('label',null,h('input',{type:'checkbox',checked:f.hideNo,onchange:e=>{f.hideNo=e.target.checked;S.page=0;refreshScout();}}),'Hide unavailable'),
+        h('label',{title:S.world.engine?'Only players who would be interested in joining '+S.world.teams[intrBuyer()].name+'. This is the game\'s own test, the one behind its "Interested Foreign Based" search option, applied to players based anywhere. It weighs the size of your club against his, his reputation, age and nationality, and whether he is transfer listed. Uses "Your club" (Role finder) if you have set one, otherwise the club you manage in the save. Your own players are left out.':'Not available for this save: it needs the manager and competition files, and does not work on the unpatched original game (2.81).',class:S.world.engine?'':'mute'},h('input',{type:'checkbox',checked:!!f.interested&&!!S.world.engine,disabled:!S.world.engine,onchange:e=>{f.interested=e.target.checked;S.page=0;refreshScout();}}),'Interested'),
         h('label',{title:'Only players the game created to replace a player who left. Needs PLAYERS.DB1; see the Regens tab.'},h('input',{type:'checkbox',checked:!!f.regen,onchange:e=>{f.regen=e.target.checked;S.page=0;refreshScout();}}),'Is regen'),
         h('label',null,h('input',{type:'checkbox',checked:f.short,onchange:e=>{f.short=e.target.checked;S.page=0;refreshScout();}}),'Shortlist only')))),
     sec(2,'Player profile','',fl(
       rng('Age',numInput(f,'ageMin','min'),numInput(f,'ageMax','max')),
       rng('Current Ability',numInput(f,'caMin','min'),numInput(f,'caMax','max')),
-      rng('Potential',numInput(f,'paMin','min'),numInput(f,'paMax','max')),
+      rng('Potential Ability',numInput(f,'paMin','min'),numInput(f,'paMax','max')),
+      rng('Potential Rating (%)',numInput(f,'potMin','min'),h('span')),
       rng('Value (£, e.g. 500000, 1000000)',moneyInput(f,'valMin','min'),moneyInput(f,'valMax','max')),
       rng('Wage per week (£, e.g. 1000, 30000)',moneyInput(f,'wageMin','min'),moneyInput(f,'wageMax','max')),
       rng('Contract ends by',numInput(f,'endMax','year'),h('span')))),
@@ -2067,6 +2139,8 @@ function renderAbout(root){
         li('On the front screen, ',B('Load last save'),' opens the folder you used last time in one click (Chrome and Edge). Your browser may ask you to allow access again each time you open the tool.'))),
     sec('The numbers: what they mean',
       h('p',null,B('Rating'),' is the tool\'s main score, and it comes straight from the match engine. The game has its own table for each square on the pitch saying how much every attribute counts there, and the tool applies those game values as they are. It then includes the player\'s CA and the position penalty for playing him on that square. The result is shown as a % of a perfect player on that square: 20 in every attribute the engine reads and the maximum CA of 200, scored by the same formula. So 80% means he has 80% of that maximum. The scale does not depend on who is in your save, so a rating means the same in every save. In the Scout, the Rating column shows each player\'s best score across the pitch, and the Best column shows the square. The Assistant Manager builds your best 11 on this number. The engine\'s attribute weightings are the game\'s own and are not editable here (the only adjustable part is the goalkeeper blend, which is an estimate). It is the engine\'s view of how a player performs, not a tactics opinion.'),
+      h('p',null,B('Potential Rating'),' is the same score with the player\'s Potential Ability in place of his Current Ability. In this game a player\'s attributes never change after he is created. Only his CA moves, once a year at the end of the season, and it cannot go above his PA. So Potential Rating shows how the engine would rate him if his CA reached his PA. It is a ceiling, not a forecast, and many players never get there. Young players with a big gap between CA and PA usually close a good part of it each year. From about '+POT_AGE+' CA stops rising on average, and from about 30 it falls, so the figure is shown faded for players aged '+POT_AGE+' and over. Use it with the age filter to find young players worth signing for the future.'),
+      h('p',null,B('Interested'),' is a Scout filter that keeps only the players who would be interested in joining your club. It is the game\'s own test, the one behind the "Interested Foreign Based" option in the game\'s player search, applied here to players based anywhere so you can combine it with every other filter. The game compares the standing of your club with his current club, and takes in his reputation, his age, his nationality, how far he would have to move and whether he is transfer listed or wants to leave. The answer is a plain yes or no, and it can change as the season goes on. It uses "Your club" in the Role finder if you have set one, otherwise the club you manage in the save. There is also an optional Interested column that gives the reason for a no. It is not available on the unpatched original game (2.81). Being interested does not mean his club will sell: use it together with Hide unavailable.'),
       h('p',null,B('Role fit'),' is a different measure, and it is the tool\'s own rather than the engine\'s. For each role (DC, WB, AM and so on) there is a profile saying which attributes matter and by how much (blank or 0 means ignored). A player\'s role fit is how well his attributes match that profile, from 0 to 100%, where 100% means 20 in every attribute the role uses. It does not include CA or position penalty. The default profiles are my estimates, built from tested position guidance, not values from the game, and you can change any of them in Settings under Position role profiles. Changing a profile changes Role fit, the best role, the role fit filters and the colours, but it does not change the Rating or the best 11, which use the engine. Each player has a fit for every role, shown in the Scout columns and in the player window. Use Rating to ask who plays best on a square, and Role fit to compare how well suited players are to a role.'),
       h('p',null,B('Position penalty'),' is the penalty on a player\'s Rating for playing in a non-natural or unsuitable position. You can see his full positional grid by clicking his name.'),
       h('p',null,B('Upgrade'),' (Scout, role finder) is how much better a player would be than your best current option for that slot, in rating points. It needs your club and formation to be set.'),
@@ -2152,8 +2226,8 @@ function renderAbout(root){
         h('p',{class:'small'},'The game sets this up by default. The number in a file name is the save slot: slot 1 files end in 1, slot 2 files end in 2, and so on, so you will only see sets for the slots you have used. The example below shows slot 1, plus one slot 2 set. PLAYERS.DB1, TMDATA.DB1 and GAMESS16.IDX are shared by all saves. Brave New World uses the same set with different names: its save files end in .SNW, its slot list is GAMESSNW.IDX and its team database is TM_BNW.DB1. The tool spots which version a save is from the file names.'),
         h('pre',{class:'dirlist'},'PLDATA1.S16   TMDATA1.S16   GNDATA1.S16   MGDATA1.S16   CPDATA1.S16     (save slot 1)\nPLDATA2.S16   TMDATA2.S16   GNDATA2.S16   MGDATA2.S16   CPDATA2.S16     (save slot 2)\nGAMESS16.IDX\nPLAYERS.DB1\nTMDATA.DB1'))),
     sec('About',
-      h('p',null,B('Version 1.2.1'),' (November 2026). A fan-made tool. Not affiliated with or endorsed by the game\'s publisher or developer.'),
-      h('details',{class:'fold'},h('summary',null,'Version history'),h('ul',null,li(B('v1.2.1'),' (November 2026): fixes for long-running saves. Clubs now show their current division however many seasons have passed, and nationalities are named even when no original players are left.'),li(B('v1.2'),' (November 2026): opens Brave New World saves as well as v2. Opens saves from the original game, including the unpatched 2.81 version, which stores its data differently. Clearer messages when a save file cannot be read.'),li(B('v1.1'),' (November 2026): new Regens tab and "Is regen" filter in Scout, showing who each regen replaced. Goalkeeper added to the league reference and Best 11 comparison. Tick boxes in Find players aligned.'),li(B('v1.0'),' (November 2026): first public release. Scout with role finder and engine-based Rating, Assistant Manager with best 11, squad depth and league reference, shortlist and settings.'))),
+      h('p',null,B('Version 1.4'),' (November 2026). A fan-made tool. Not affiliated with or endorsed by the game\'s publisher or developer.'),
+      h('details',{class:'fold'},h('summary',null,'Version history'),h('ul',null,li(B('v1.4'),' (November 2026): Interested filter. Shows only the players who would be interested in joining your club, using the game\'s own test.'),li(B('v1.3'),' (November 2026): Potential Rating. A new Scout column, filter and player-window figure showing how a player would rate if his CA reached his PA.'),li(B('v1.2.1'),' (November 2026): fixes for long-running saves. Clubs now show their current division however many seasons have passed, and nationalities are named even when no original players are left.'),li(B('v1.2'),' (November 2026): opens Brave New World saves as well as v2. Opens saves from the original game, including the unpatched 2.81 version, which stores its data differently. Clearer messages when a save file cannot be read.'),li(B('v1.1'),' (November 2026): new Regens tab and "Is regen" filter in Scout, showing who each regen replaced. Goalkeeper added to the league reference and Best 11 comparison. Tick boxes in Find players aligned.'),li(B('v1.0'),' (November 2026): first public release. Scout with role finder and engine-based Rating, Assistant Manager with best 11, squad depth and league reference, shortlist and settings.'))),
       h('p',null,'Created by ',X('RobertoLarcos_6','@RobertoLarcos_6'),'. Contact and updates on X. If the tool helps you, you can ',coffeeBtn('coffeelink','buy me a coffee'),'.'),
       h('p',null,...DISCLAIMER()),
       h('p',null,'The engine scoring is a port of the game\'s own routines, checked against the original program. The way the match engine uses attributes was also informed by John North\'s "Exploring the Match Engine" article. Everything runs in your browser.')),
